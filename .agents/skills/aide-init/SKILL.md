@@ -56,16 +56,22 @@ Statusの名称・順序・色:
 | `In review` | PR確認中 | `ORANGE` |
 | `Done` | 完了条件達成・マージ済み | `GREEN` |
 
-`gh project field-list`でStatus fieldとoption ID、`gh project item-list`で項目数・Statusを確認する。IDを推測しない。
+Projectを作成またはリンクした直後、Statusを作成・変更する前に必ず既存フィールドを読み戻す。GitHubが作成時に`Status`を用意している場合があるため、確認前に`field-create`を実行しない。
 
-- 一致していれば変更しない。
-- Status fieldがなければ作成する。
+```sh
+gh project field-list <number> --owner <owner> --format json
+```
+
+- `Status` fieldがあり、選択肢も一致していれば変更しない。
+- `Status` fieldがあれば再利用する。選択肢が異なる場合は`gh project item-list`で項目数を確認する。
+- `Status` fieldがないことを確認した場合に限り作成する。
 
 ```sh
 gh project field-create <number> --owner <owner> --name Status --data-type SINGLE_SELECT --single-select-options "Backlog,Ready,In progress,In review,Done" --format json
 ```
 
-- 既定Statusの選択肢を変更する場合は、空Projectに限り`updateProjectV2Field`を使用。既存IDを保持し、新規optionのIDはGitHubに発行させる。未知のoptionがあれば停止。
+- `field-create`が予約名・重複などのエラーになった場合は再試行せず、`field-list`を再実行して既存フィールドを確認し、再利用または更新へ切り替える。別Projectを重複作成しない。
+- 既存Statusの選択肢変更は空Projectに限り`updateProjectV2Field`を使用する。変更前にfield IDと全optionを読み、保持するoptionのIDを指定し、新規optionのIDはGitHubに発行させる。APIには望む選択肢全体を渡し、更新後に名前・順序・色・IDを読み戻す。未知のoptionがあれば停止。
 - 項目があるProjectのStatus変更、option削除、項目移動は個別承認なしに行わない。
 
 CLIやAPIの形式が不明な場合は、`gh <command> --help`とGitHub公式仕様を確認し、推測で書き込まない。
