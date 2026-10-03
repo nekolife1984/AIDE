@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "repository": {
+    "owner": "nekolife1984",
+    "name": "AIDE"
+  },
+  "project_defaults": {
+    "title": "AIDE",
+    "visibility": "PRIVATE"
+  },
+  "project": null
+}
