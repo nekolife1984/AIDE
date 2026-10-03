@@ -16,7 +16,7 @@ python3 .agents/skills/aide-init/scripts/aide_init.py --dry-run
 python3 .agents/skills/aide-init/scripts/aide_init.py
 ```
 
-初回はdry-runの対象・変更計画を確認してから実行する。非対話実行では`--yes`で計画を承認する。新規ProjectをPublicにする場合は、追加で`--approve-public-project`が必要（例: `--yes --approve-public-project`）。Python標準ライブラリ以外の依存はない。
+初回はdry-runの対象・変更計画を確認してから実行する。`.agents/project.json`はGit管理対象外のローカルキャッシュで、未作成の場合はGitHubからRepository直結Projectを検出・検証して作成する。非対話実行では`--yes`で計画を承認する。新規ProjectをPublicにする場合は、追加で`--approve-public-project`が必要（例: `--yes --approve-public-project`）。Python標準ライブラリ以外の依存はない。
 
 ## 安全境界
 
