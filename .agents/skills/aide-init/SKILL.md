@@ -5,107 +5,32 @@ description: Use when initializing or reconciling a repository's GitHub Project 
 
 # AIDE Init: GitHub Project
 
-リポジトリ用GitHub Projectの作成・再利用・初期設定手順。
+Project初期化の実処理は、同梱スクリプトを唯一の実行手順とする。対象RepositoryのIssue Projectを作成・再利用・リンクし、AIDE標準Statusを検証する。
 
-## 対象
+## 実行
 
-Projectの作成、リポジトリへのリンク、AIDE標準Statusの設定。Issueの移行、自動追加Workflow、ラベル、ブランチ保護、Secret設定は対象外。
-
-## 手順
-
-### 1. キャッシュと対象の確認
-
-`.agents/project.json`を読み、`schema_version`とGit remoteの`owner/repository`が一致することを確認する。認証とremoteは毎回確認する。
+Repository rootで実行する。必要条件はGitHub CLI (`gh`) の認証と`project` scope。
 
 ```sh
-gh auth status
-git remote get-url origin
+python3 .agents/skills/aide-init/scripts/aide_init.py --dry-run
+python3 .agents/skills/aide-init/scripts/aide_init.py
 ```
 
-- 認証には`project`権限が必要。不足時は`gh auth refresh -s project`を案内する。認証情報を尋ねたり保存したりしない。
-- JSONが破損・未対応、remoteが不一致、Issueが無効、権限不足なら書き込まず停止する。
-- `project`が設定済みなら、保存されたowner/numberで対象Projectを直接確認する。Project一覧は検索しない。title、visibility、node ID、Repositoryリンクがキャッシュと異なる場合は停止し、再探索・修復の承認を得る。
-- `project`が`null`の場合だけ初回探索する。`gh repo view --json nameWithOwner,owner,hasIssuesEnabled`で対象を確定し、`gh project list --owner <owner> --closed --limit 1000 --format json`から候補を調べる。Projectのリンク先はGraphQLの`ProjectV2.repositories`で確認する。Organization Ownerでは`user`を`organization`に置き換える。
-- 対象Repositoryにリンク済みのProjectが1つなら再利用。複数、閉鎖済み、または候補が曖昧なら停止して選択を依頼する。未リンクでRepository名と完全一致する空Projectが1つなら再利用候補。候補がなければ新規作成。
+初回はdry-runの対象・変更計画を確認してから実行する。非対話実行では`--yes`で計画を承認する。新規ProjectをPublicにする場合は、追加で`--approve-public-project`が必要（例: `--yes --approve-public-project`）。Python標準ライブラリ以外の依存はない。
 
-### 2. 計画と承認
+## 安全境界
 
-書き込み前に、Owner、Repository、Project URLまたは作成名、可視性、リンク・Status変更を提示する。セットアップの明示依頼は、新しいPrivate Projectの作成・リンクと空Projectの初期設定への承認とする。Public化、既存項目の移動、既存Status変更、複数候補の選択は別途明示承認が必要。
+- origin、GitHub Repository、`.agents/project.json`を照合する。設定済みキャッシュはProject一覧を再探索せず、保存されたProjectを直接読み戻す。
+- 初回探索ではRepository直結Projectを再利用する。リンク済みが複数、閉鎖済み、候補が曖昧な場合は停止する。未リンクProjectは同名かつ空の場合だけ再利用し、共有・項目ありの候補、Issue無効、認証不足、破損/不一致キャッシュでは停止する。
+- `--dry-run`はGitHub・キャッシュを書き換えない。書き込み前に計画を表示し、Project作成時は可視性を明示してからRepositoryへリンクする。
+- Statusは必ず読み戻してから作成・更新する。GitHub既定の`Todo` / `In Progress` / `Done`はAIDE標準へ移行し、対応するoption IDを保持する。アーカイブ済み・未アーカイブ双方を含む項目数で空状態を判定する。
+- 項目があるProjectでStatusが欠落または不一致の場合は既定で停止する。項目と影響を確認した場合だけ`--approve-status-update-with-items`で明示承認する。未知のoption、読み戻し失敗、想定外Repositoryは承認フラグでも変更しない。
+- GitHubの状態を再取得・検証した後だけ`.agents/project.json`をatomic更新する。Tokenなど秘密情報や変動するfield/option IDは保存しない。
 
-### 3. 作成・リンク
-
-`.agents/project.json`の`project_defaults.title`と`visibility`を使用する。未設定時はRepository名と`PRIVATE`を既定値にする。
+## テスト
 
 ```sh
-gh project create --owner <owner> --title "<title>" --format json
-gh project edit <number> --owner <owner> --description "リポジトリのIssue・PRの進捗管理" --visibility <visibility>
-gh project link <number> --owner <owner> --repo <repository>
+python3 -m unittest discover -s .agents/skills/aide-init/tests -v
 ```
 
-作成結果のProject番号を使う。途中失敗時は同じProjectを読み戻して再開し、重複作成しない。リンク済みなら再リンク不要。
-
-### 4. Status設定
-
-Statusの名称・順序・色:
-
-| Status | 意味 | 色 |
-|---|---|---|
-| `Backlog` | 未着手 | `GRAY` |
-| `Ready` | 着手可能・依存解決済み | `BLUE` |
-| `In progress` | 作業中 | `YELLOW` |
-| `In review` | PR確認中 | `ORANGE` |
-| `Done` | 完了条件達成・マージ済み | `GREEN` |
-
-Projectを作成またはリンクした直後、Statusを作成・変更する前に必ず既存フィールドを読み戻す。GitHubが作成時に`Status`を用意している場合があるため、確認前に`field-create`を実行しない。
-
-```sh
-gh project field-list <number> --owner <owner> --format json
-```
-
-- `Status` fieldがあり、選択肢も一致していれば変更しない。
-- `Status` fieldがあれば再利用する。選択肢が異なる場合、`gh project item-list`だけではアーカイブ済み項目が漏れるため、それだけでProjectが空だと判定しない。
-- 既存選択肢の変更前に、`gh project view <number> --owner <owner> --format json`で取得したProject node IDを使い、アーカイブ済み・未アーカイブの両方を含む件数を確認する。
-
-```sh
-gh api graphql -f query='query { node(id: "<project-node-id>") { ... on ProjectV2 { items(first: 1, archivedStates: [ARCHIVED, NOT_ARCHIVED]) { totalCount } } } }'
-```
-
-`totalCount`が`0`の場合だけ、通常の初期化として選択肢を更新できる。1件以上ある場合は更新を止め、明示的な承認を得る。項目の内容も列挙する場合は、`ARCHIVED`と`NOT_ARCHIVED`の双方を対象に全ページを取得する。`archivedStates`（省略時は未アーカイブのみ）と`totalCount`の仕様は[GitHub GraphQL Projects reference](https://docs.github.com/en/graphql/reference/projects)を参照する。
-- `Status` fieldがないことを確認した場合に限り作成する。
-
-```sh
-gh project field-create <number> --owner <owner> --name Status --data-type SINGLE_SELECT --single-select-options "Backlog,Ready,In progress,In review,Done" --format json
-```
-
-- `field-create`が予約名・重複などのエラーになった場合は再試行せず、`field-list`を再実行して既存フィールドを確認し、再利用または更新へ切り替える。別Projectを重複作成しない。
-- 既存Statusの選択肢変更では、変更前にfield IDと全optionを読み、保持するoptionのIDを指定し、新規optionのIDはGitHubに発行させる。APIには望む選択肢全体を渡し、更新後に名前・順序・色・IDを読み戻す。未知のoptionがあれば停止。
-- 項目があるProjectのStatus変更、option削除、項目移動は個別承認なしに行わない。
-
-CLIやAPIの形式が不明な場合は、`gh <command> --help`とGitHub公式仕様を確認し、推測で書き込まない。
-
-### 5. 読み戻し・キャッシュ更新
-
-GitHubから再取得し、Owner、number、node ID、title、URL、visibility、Repositoryリンク、Statusの5選択肢と順序、意図しない項目変更がないことを確認する。成功レスポンスだけで完了扱いにしない。
-
-初回または承認済み変更で情報が変わった場合のみ、検証後に`.agents/project.json`を更新する。途中失敗では成功状態を保存しない。可能ならatomic replaceを使う。設定済みキャッシュに変更がなければ再保存しない。
-
-## `.agents/project.json`
-
-Repository管理対象。非秘密の安定情報と既定値を保存し、Token、個人情報、変動するfield/option IDは保存しない。
-
-```json
-{
-  "schema_version": 1,
-  "repository": {"owner": "<owner>", "name": "<repository>"},
-  "project_defaults": {"title": "<project-title>", "visibility": "PRIVATE"},
-  "project": null
-}
-```
-
-セットアップ後の`project`には`owner`、`owner_type`、`number`、`node_id`、`title`、`url`、`visibility`、`repository`（`owner/name`）を保存する。
-
-## 注意事項
-
-- Project StatusはIssue依存関係の代替ではない。
-- Project number、node ID、field ID、option ID、item IDを混同しない。
-- 権限・API・読み戻しのエラー時は停止し、重複作成を避ける。
+GitHub CLIをモックし、dry-run、初回探索、衝突、Status更新、失敗時のキャッシュ保護を検証する。
