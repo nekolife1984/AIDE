@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = SKILL_ROOT.parents[2]
 SCRIPT = SKILL_ROOT / "scripts" / "aide_init.py"
 MOCK_GH = r'''#!/usr/bin/env python3
 import json
@@ -252,6 +253,29 @@ class AideInitScriptTests(unittest.TestCase):
     def mutations(self):
         write_prefixes = {("project", "create"), ("project", "edit"), ("project", "link"), ("project", "field-create")}
         return [call for call in self.calls() if tuple(call[:2]) in write_prefixes or (call[:2] == ["api", "graphql"] and "updateProjectV2Field" in call)]
+
+    def test_project_cache_is_gitignored(self):
+        result = subprocess.run(
+            ["git", "-C", str(REPOSITORY_ROOT), "check-ignore", "--no-index", ".agents/project.json"],
+            capture_output=True, text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        self.assertEqual(result.stdout.strip(), ".agents/project.json")
+
+    def test_missing_cache_is_created_after_project_is_verified(self):
+        linked_project = project_state()
+        self.write_state(project=linked_project, projects=[linked_project])
+        cache_path = self.repo / ".agents" / "project.json"
+        self.assertFalse(cache_path.exists())
+
+        result = self.run_script("--yes")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        saved = json.loads(cache_path.read_text())
+        self.assertEqual(saved["project"], project_cache())
+        self.assertFalse(any(call[:2] == ["project", "create"] for call in self.calls()))
+        self.assertFalse(any(call[:2] == ["project", "link"] for call in self.calls()))
 
     def test_cached_dry_run_is_read_only_and_does_not_enumerate_projects(self):
         self.write_state()
