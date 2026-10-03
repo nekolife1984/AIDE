@@ -8,5 +8,14 @@
     "title": "AIDE",
     "visibility": "PRIVATE"
   },
-  "project": null
+  "project": {
+    "owner": "nekolife1984",
+    "owner_type": "User",
+    "number": 11,
+    "node_id": "PVT_kwHOALPqaM4BliOV",
+    "title": "AIDE",
+    "url": "https://github.com/users/nekolife1984/projects/11",
+    "visibility": "PRIVATE",
+    "repository": "nekolife1984/AIDE"
+  }
 }
