@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import subprocess
@@ -5,10 +6,25 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL_ROOT / "scripts" / "aide_init.py"
+MODULE_SPEC = importlib.util.spec_from_file_location("aide_init_under_test", SCRIPT)
+if MODULE_SPEC is None or MODULE_SPEC.loader is None:
+    raise ImportError("Unable to load aide_init.py for tests")
+AIDE_INIT = importlib.util.module_from_spec(MODULE_SPEC)
+MODULE_SPEC.loader.exec_module(AIDE_INIT)
+SYNTHETIC_TOKENS = (
+    "ghp_SYNTHETIC_CLASSIC_TOKEN",
+    "gho_SYNTHETIC_OAUTH_TOKEN",
+    "ghu_SYNTHETIC_USER_APP_TOKEN",
+    "ghs_SYNTHETIC_INSTALLATION_TOKEN",
+    "ghs_" + ".".join(("SYNTHETIC_APP_ID", "SYNTHETIC_HEADER", "SYNTHETIC_PAYLOAD")),
+    "ghr_SYNTHETIC_REFRESH_TOKEN",
+    "github_pat_SYNTHETIC_FINE_GRAINED_TOKEN",
+)
 MOCK_GH = r'''#!/usr/bin/env python3
 import json
 import os
@@ -276,6 +292,105 @@ class AideInitScriptTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         self.assertEqual(result.stdout.strip(), ".agents/project.json")
+
+    def test_cli_failures_redact_all_github_token_formats(self):
+        for token in SYNTHETIC_TOKENS:
+            with self.subTest(token_prefix=token.split("_", 1)[0]):
+                process = subprocess.CompletedProcess(
+                    args=["gh", "api", "graphql"],
+                    returncode=1,
+                    stdout="",
+                    stderr="Request failed for {} after value".format(token),
+                )
+                with patch.object(AIDE_INIT.subprocess, "run", return_value=process):
+                    with self.assertRaises(AIDE_INIT.InitError) as raised:
+                        AIDE_INIT.run_command(["gh", "api", "graphql"])
+
+                self.assertEqual(
+                    str(raised.exception),
+                    "Command failed (gh api graphql): Request failed for [REDACTED] after value",
+                )
+
+    def test_graphql_errors_redact_all_github_token_formats(self):
+        for token in SYNTHETIC_TOKENS:
+            with self.subTest(token_prefix=token.split("_", 1)[0]):
+                response = {"errors": [{"message": "Request failed for {} after value".format(token)}]}
+                with patch.object(AIDE_INIT, "run_json", return_value=response):
+                    with self.assertRaises(AIDE_INIT.InitError) as raised:
+                        AIDE_INIT.graphql("query { viewer { login } }", {})
+
+                self.assertEqual(
+                    str(raised.exception),
+                    "GitHub GraphQL request failed: Request failed for [REDACTED] after value",
+                )
+
+    def test_env_ignore_rules_apply_in_fresh_clone_and_allow_example(self):
+        source_repository = self.root / "ignore-source"
+        clone = self.root / "fresh-clone"
+        source_repository.mkdir()
+        shared_gitignore = SCRIPT.parents[4] / ".gitignore"
+        ignore_content = shared_gitignore.read_text(encoding="utf-8")
+        (source_repository / ".gitignore").write_text(ignore_content, encoding="utf-8")
+        subprocess.run(["git", "init", "-q", str(source_repository)], check=True, env=self.git_env)
+        subprocess.run(
+            ["git", "-C", str(source_repository), "config", "user.name", "AIDE tests"],
+            check=True,
+            env=self.git_env,
+        )
+        subprocess.run(
+            ["git", "-C", str(source_repository), "config", "user.email", "tests@example.invalid"],
+            check=True,
+            env=self.git_env,
+        )
+        subprocess.run(
+            ["git", "-C", str(source_repository), "add", "--", ".gitignore"],
+            check=True,
+            env=self.git_env,
+        )
+        subprocess.run(
+            ["git", "-C", str(source_repository), "commit", "-qm", "Add shared ignore rules"],
+            check=True,
+            env=self.git_env,
+        )
+        subprocess.run(
+            ["git", "clone", "--quiet", "--no-local", str(source_repository), str(clone)],
+            check=True,
+            env=self.git_env,
+        )
+
+        for filename in (".env", ".env.local", ".env.production.local"):
+            (clone / filename).write_text("VALUE=synthetic\n", encoding="utf-8")
+            result = subprocess.run(
+                ["git", "-C", str(clone), "check-ignore", "--no-index", "--quiet", "--", filename],
+                capture_output=True,
+                text=True,
+                env=self.git_env,
+            )
+            self.assertEqual(result.returncode, 0, "{} was not ignored".format(filename))
+
+        example = clone / ".env.example"
+        example.write_text("PUBLIC_VALUE=placeholder\n", encoding="utf-8")
+        not_ignored = subprocess.run(
+            ["git", "-C", str(clone), "check-ignore", "--no-index", "--quiet", "--", ".env.example"],
+            capture_output=True,
+            text=True,
+            env=self.git_env,
+        )
+        self.assertEqual(not_ignored.returncode, 1, not_ignored.stderr)
+        subprocess.run(
+            ["git", "-C", str(clone), "add", "--", ".env.example"],
+            check=True,
+            env=self.git_env,
+        )
+        staged_paths = subprocess.run(
+            ["git", "-C", str(clone), "diff", "--cached", "--name-only"],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=self.git_env,
+        ).stdout.splitlines()
+        self.assertIn(".env.example", staged_paths)
+        self.assertNotIn(".agents/project.json", ignore_content)
 
     def test_missing_cache_is_created_after_project_is_verified(self):
         linked_project = project_state()

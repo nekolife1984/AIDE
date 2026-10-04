@@ -118,7 +118,8 @@ class InitError(Exception):
 
 
 def redact(text: str) -> str:
-    text = re.sub(r"(?i)(gho_|github_pat_)[A-Za-z0-9_]+", "[REDACTED]", text)
+    token_prefixes = r"(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_)"
+    text = re.sub(r"(?i){}[A-Za-z0-9._-]+".format(token_prefixes), "[REDACTED]", text)
     return text
 
 
