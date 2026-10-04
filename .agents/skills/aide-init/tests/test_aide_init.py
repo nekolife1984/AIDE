@@ -8,7 +8,6 @@ from pathlib import Path
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
-REPOSITORY_ROOT = SKILL_ROOT.parents[2]
 SCRIPT = SKILL_ROOT / "scripts" / "aide_init.py"
 MOCK_GH = r'''#!/usr/bin/env python3
 import json
@@ -202,8 +201,19 @@ class AideInitScriptTests(unittest.TestCase):
         self.repo = self.root / "repo"
         self.repo.mkdir()
         (self.repo / ".agents").mkdir()
-        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
-        subprocess.run(["git", "-C", str(self.repo), "remote", "add", "origin", "https://github.com/acme/Widget.git"], check=True)
+        global_config = self.root / "empty.gitconfig"
+        global_config.write_text("")
+        self.git_env = os.environ.copy()
+        for key in list(self.git_env):
+            if key.startswith("GIT_"):
+                self.git_env.pop(key)
+        self.git_env["GIT_CONFIG_NOSYSTEM"] = "1"
+        self.git_env["GIT_CONFIG_GLOBAL"] = str(global_config)
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True, env=self.git_env)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "remote", "add", "origin", "https://github.com/acme/Widget.git"],
+            check=True, env=self.git_env,
+        )
         self.bin = self.root / "bin"
         self.bin.mkdir()
         gh = self.bin / "gh"
@@ -211,7 +221,7 @@ class AideInitScriptTests(unittest.TestCase):
         gh.chmod(0o755)
         self.state_path = self.root / "state.json"
         self.log_path = self.root / "calls.jsonl"
-        self.env = os.environ.copy()
+        self.env = self.git_env.copy()
         self.env["PATH"] = str(self.bin) + os.pathsep + self.env.get("PATH", "")
         self.env["AIDE_MOCK_STATE"] = str(self.state_path)
         self.env["AIDE_MOCK_LOG"] = str(self.log_path)
@@ -255,9 +265,13 @@ class AideInitScriptTests(unittest.TestCase):
         return [call for call in self.calls() if tuple(call[:2]) in write_prefixes or (call[:2] == ["api", "graphql"] and "updateProjectV2Field" in call)]
 
     def test_project_cache_is_gitignored(self):
+        exclude_path = self.repo / ".git" / "info" / "exclude"
+        with exclude_path.open("a") as exclude_file:
+            exclude_file.write("\n/.agents/project.json\n")
+
         result = subprocess.run(
-            ["git", "-C", str(REPOSITORY_ROOT), "check-ignore", "--no-index", ".agents/project.json"],
-            capture_output=True, text=True,
+            ["git", "-C", str(self.repo), "check-ignore", "--no-index", "--", ".agents/project.json"],
+            capture_output=True, text=True, env=self.git_env,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
