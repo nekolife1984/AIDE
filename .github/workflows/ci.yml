@@ -66,7 +66,5 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
-      - name: Temporary failure propagation probe
-        run: exit 1
       - name: Require all validations to pass
         run: bash .github/scripts/require_ci_checks.sh
