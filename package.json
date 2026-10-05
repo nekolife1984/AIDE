@@ -12,6 +12,7 @@
     "scripts/templates/gitignore",
     ".agents/docs/",
     ".agents/skills/aide-init/SKILL.md",
+    ".agents/skills/aide-workflow/SKILL.md",
     "AGENTS.md",
     "README.md"
   ],

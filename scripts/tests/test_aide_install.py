@@ -36,6 +36,26 @@ class AideInstallTests(unittest.TestCase):
             self.assertTrue((self.target / relative).is_file(), relative)
         self.assertFalse((self.target / ".agents/project.json").exists())
 
+    def test_workflow_skill_is_distributed_with_resolvable_guidance(self):
+        relative = ".agents/skills/aide-workflow/SKILL.md"
+        code, output = self.run_cli("--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn(relative, output)
+        self.assertEqual(list(self.target.iterdir()), [])
+
+        self.assertEqual(self.run_cli("--apply")[0], 0)
+        skill = self.target / relative
+        self.assertTrue(skill.is_file())
+        self.assertEqual(skill.read_bytes(), (aide_install.REPO_ROOT / relative).read_bytes())
+        agents = (self.target / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn(relative, agents)
+
+        from scripts.check_markdown_links import validate_repository
+
+        errors, _ = validate_repository(self.target)
+        self.assertEqual(errors, [])
+        self.assertFalse((self.target / ".agents/project.json").exists())
+
     def test_rerun_reports_identical_and_preserves_files(self):
         self.assertEqual(self.run_cli("--apply")[0], 0)
         before = {p.relative_to(self.target): p.read_bytes() for p in self.target.rglob("*") if p.is_file()}
@@ -88,6 +108,7 @@ class AideInstallTests(unittest.TestCase):
         code, output = self.run_cli("--apply")
         self.assertEqual(code, 0)
         self.assertIn("統合案", output)
+        self.assertIn((aide_install.REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"), output)
         self.assertEqual(agents.read_text(encoding="utf-8"), "custom agents\n")
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "custom ignore\n")
 
@@ -128,6 +149,31 @@ class AideInstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("dry-run", result.stdout)
         self.assertEqual(list(self.target.iterdir()), [])
+
+    @unittest.skipUnless(shutil.which("npm"), "npm is required for package distribution test")
+    def test_npm_package_contains_all_manifest_sources(self):
+        import json
+        import os
+
+        with tempfile.TemporaryDirectory() as temp:
+            env = dict(os.environ, npm_config_cache=temp)
+            result = subprocess.run(
+                ["npm", "pack", "--dry-run", "--ignore-scripts", "--json"],
+                cwd=aide_install.REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        packages = json.loads(result.stdout)
+        self.assertEqual(len(packages), 1)
+        packaged_paths = {entry["path"] for entry in packages[0]["files"]}
+        for relative in aide_install.load_manifest():
+            source = aide_install.source_path(relative).relative_to(aide_install.REPO_ROOT)
+            if relative == ".gitignore":
+                source = aide_install.SOURCE_FALLBACKS[relative]
+            self.assertIn(source.as_posix(), packaged_paths)
 
     def test_symlink_destination_is_rejected_before_writing(self):
         outside = self.target.parent / f"{self.target.name}-outside"

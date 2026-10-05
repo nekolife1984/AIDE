@@ -14,7 +14,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = REPO_ROOT / "scripts" / "aide_install_manifest.json"
 SPECIAL_FILES = {
-    "AGENTS.md": "既存内容を保持します。AIDEの案内を追加する場合は、次を既存ルールに統合してください:\n\n# 開発ルール\n\n[開発ルール目次](.agents/docs/00_index.md)を参照\n",
+    "AGENTS.md": "既存内容を保持します。AIDEの案内を追加する場合は、次を既存ルールに統合してください:\n",
     ".gitignore": "既存内容を保持します。必要に応じて次を既存ルールへ統合してください:\n\n# ローカル環境設定（例示ファイルは追跡可能）\n.env\n.env.*\n!.env.example\n",
 }
 SOURCE_FALLBACKS = {
@@ -156,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{status}] {relative}")
         if relative in SPECIAL_FILES and status == "統合案を提示（既存ファイルは保持）":
             print(SPECIAL_FILES[relative])
+            if relative == "AGENTS.md":
+                print(source_path(relative).read_text(encoding="utf-8"))
         elif relative in conflicts and (target / relative).is_file():
             source_text = source_path(relative).read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
             target_text = (target / relative).read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)

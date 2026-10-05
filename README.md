@@ -1,6 +1,6 @@
 # AIDE
 
-AIコーディングエージェントと開発するリポジトリ向けのGitHubテンプレートです。`AGENTS.md`から開発ルールを案内し、Issue・Project運用、品質、セキュリティの資料と、GitHub Project初期化スキルを提供します。
+AIコーディングエージェントと開発するリポジトリ向けのGitHubテンプレートです。`AGENTS.md`から開発ルールを案内し、Issue・Project運用、品質、セキュリティの資料と、開発フロー・GitHub Project初期化スキルを提供します。ルールの正本は文書、工程の実行順序と参照先はスキルで管理します。
 
 ## 初めて使う
 
@@ -71,6 +71,7 @@ python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --app
 ## 詳細
 
 - [開発ルール目次](.agents/docs/00_index.md)
+- [開発フローの実行順序と参照先](.agents/skills/aide-workflow/SKILL.md)
 - [GitHub Project初期化の手順と安全境界](.agents/skills/aide-init/SKILL.md)
 - [既存リポジトリ向け導入スクリプト](scripts/aide_install.py)
 - [導入対象マニフェスト](scripts/aide_install_manifest.json)
