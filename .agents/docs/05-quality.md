@@ -20,12 +20,11 @@
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python -m pip install --requirement requirements-ci.txt
-PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s .agents/skills/aide-init/tests -v
 PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s scripts/tests -v
 PYTHONDONTWRITEBYTECODE=1 python scripts/check_markdown_links.py
 ```
 
-Markdown検証は`requirements-ci.txt`で固定したGitHub Flavored Markdownパーサーを使う。`aide-init`自体に外部依存はない。
+Markdown検証は`requirements-ci.txt`で固定したGitHub Flavored Markdownパーサーを使う。
 
 `.github/workflows/ci.yml`はAIDEリポジトリの`main`向けPull Requestと`main`へのpushで検証を実行する。GitHubテンプレートから生成されたリポジトリへWorkflowファイルが複製されても、AIDE以外では全ジョブをスキップする。パスフィルターで必須チェックが未実行にならないよう、AIDE内の検証は毎回実行する。
 

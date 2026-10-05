@@ -5,32 +5,35 @@ description: Use when initializing or reconciling a repository's GitHub Project 
 
 # AIDE Init: GitHub Project
 
-Project初期化の実処理は、同梱スクリプトを唯一の実行手順とする。対象RepositoryのIssue Projectを作成・再利用・リンクし、AIDE標準Statusを検証する。
+Pythonを使えない環境でも、AIエージェントがGitHub CLIで対象RepositoryのIssue Projectを確認・初期化し、`.agents/project.json`を作成できるようにする。GitHubの実状態を確認してから必要な変更だけを行い、最後にGitHubとJSONを読み戻して一致を検証する。
 
 ## 実行
 
-Repository rootで実行する。必要条件はGitHub CLI (`gh`) の認証と`project` scope。
+Repository rootで、GitHub CLI (`gh`) の認証とProject操作権限を確認する。
 
-```sh
-python3 .agents/skills/aide-init/scripts/aide_init.py --dry-run
-python3 .agents/skills/aide-init/scripts/aide_init.py
+1. `origin`・認証先・`.agents/project.json`を照合し、キャッシュがあればGitHub上のProjectと比較する。
+2. キャッシュがなければRepositoryにリンク済みの候補を探す。同名の未リンクProjectは、同じ可視性で空の場合のみ再利用する。候補の重複・閉鎖・Issue無効・owner/Repository不一致・取得不完全なら停止する。
+3. 対象と変更計画を提示して承認を待ち、その後にだけProject作成・リンク・Status設定を行う。Public作成と、項目があるProjectのStatus変更には、通常承認とは別に影響を示した明示承認を得る。GitHub既定optionは対応を確認して移行し、未知optionは上書きしない。
+4. Repositoryリンク・可視性・Status/options・項目数（アーカイブ済みを含む）を読み戻して照合した後、`.agents/project.json`を作成・読み戻し検証する。失敗・不一致・判断不能時は停止し、書き込みを続けない。
+
+`.agents/project.json`はGit管理対象外のローカルキャッシュとする。
+
+## アウトプット
+
+`.agents/project.json`は次の情報を保持する。Project選定前の`project`は`null`、初期化後は実際のProject情報（owner、owner_type、number、node_id、title、url、visibility、repository）を設定する。field/option IDや認証情報は含めない。
+
+```json
+{
+  "schema_version": 1,
+  "repository": {"owner": "OWNER", "name": "REPOSITORY"},
+  "project_defaults": {"title": "TITLE", "visibility": "PRIVATE"},
+  "project": null
+}
 ```
 
-初回はdry-runの対象・変更計画を確認してから実行する。`.agents/project.json`はGit管理対象外のローカルキャッシュで、未作成の場合はGitHubからRepository直結Projectを検出・検証して作成する。非対話実行では`--yes`で計画を承認する。新規ProjectをPublicにする場合は、追加で`--approve-public-project`が必要（例: `--yes --approve-public-project`）。Python標準ライブラリ以外の依存はない。
+完了時は対象ProjectのURL、確認・変更した内容、キャッシュの検証結果を報告する。停止した場合は理由と未実施の変更を報告する。
 
 ## 安全境界
 
-- origin、GitHub Repository、`.agents/project.json`を照合する。設定済みキャッシュはProject一覧を再探索せず、保存されたProjectを直接読み戻す。
-- 初回探索ではRepository直結Projectを再利用する。リンク済みが複数、閉鎖済み、候補が曖昧な場合は停止する。未リンクProjectは同名かつ空の場合だけ再利用し、共有・項目ありの候補、Issue無効、認証不足、破損/不一致キャッシュでは停止する。
-- `--dry-run`はGitHub・キャッシュを書き換えない。書き込み前に計画を表示し、Project作成時は可視性を明示してからRepositoryへリンクする。
-- Statusは必ず読み戻してから作成・更新する。GitHub既定の`Todo` / `In Progress` / `Done`はAIDE標準へ移行し、対応するoption IDを保持する。アーカイブ済み・未アーカイブ双方を含む項目数で空状態を判定する。
-- 項目があるProjectでStatusが欠落または不一致の場合は既定で停止する。項目と影響を確認した場合だけ`--approve-status-update-with-items`で明示承認する。未知のoption、読み戻し失敗、想定外Repositoryは承認フラグでも変更しない。
-- GitHubの状態を再取得・検証した後だけ`.agents/project.json`をatomic更新する。Tokenなど秘密情報や変動するfield/option IDは保存しない。
-
-## テスト
-
-```sh
-python3 -m unittest discover -s .agents/skills/aide-init/tests -v
-```
-
-GitHub CLIをモックし、dry-run、初回探索、衝突、Status更新、失敗時のキャッシュ保護を検証する。
+- origin・認証先・Projectリンク・可視性・Status・キャッシュの不一致、曖昧な候補、取得不完全、権限不足では推測で選択・変更しない。項目のあるProjectのStatus変更や未知optionの上書きも行わない。項目数はアーカイブ済みも含めて確認する。
+- キャッシュのsymlinkや不正な配置を拒否し、GitHubの状態を検証した後にのみ書き込む。秘密情報、token、field/option IDは保存しない。
