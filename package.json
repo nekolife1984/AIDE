@@ -1,0 +1,21 @@
+{
+  "name": "aide-existing-repo-installer",
+  "version": "0.1.0",
+  "description": "Safely install reusable AIDE guidance into an existing repository",
+  "bin": {
+    "aide-install": "bin/aide-install.js"
+  },
+  "files": [
+    "bin/",
+    "scripts/aide_install.py",
+    "scripts/aide_install_manifest.json",
+    "scripts/templates/gitignore",
+    ".agents/docs/",
+    ".agents/skills/aide-init/SKILL.md",
+    "AGENTS.md",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

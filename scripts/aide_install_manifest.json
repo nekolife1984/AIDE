@@ -1,0 +1,16 @@
+{
+  "files": [
+    ".agents/docs/00_index.md",
+    ".agents/docs/01-branches.md",
+    ".agents/docs/02-issues.md",
+    ".agents/docs/03-project.md",
+    ".agents/docs/04-workflow.md",
+    ".agents/docs/05-quality.md",
+    ".agents/docs/06-security.md",
+    ".agents/docs/07-review.md",
+    ".agents/docs/08-commit-messages.md",
+    ".agents/skills/aide-init/SKILL.md",
+    "AGENTS.md",
+    ".gitignore"
+  ]
+}
