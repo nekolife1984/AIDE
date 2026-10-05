@@ -11,9 +11,9 @@
     "scripts/aide_install_manifest.json",
     "scripts/templates/gitignore",
     ".agents/docs/",
+    ".agents/templates/",
     ".agents/skills/aide-init/SKILL.md",
     ".agents/skills/aide-workflow/SKILL.md",
-    "AGENTS.md",
     "README.md"
   ],
   "engines": {

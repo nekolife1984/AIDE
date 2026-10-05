@@ -47,8 +47,10 @@ class AideInstallTests(unittest.TestCase):
         skill = self.target / relative
         self.assertTrue(skill.is_file())
         self.assertEqual(skill.read_bytes(), (aide_install.REPO_ROOT / relative).read_bytes())
-        agents = (self.target / "AGENTS.md").read_text(encoding="utf-8")
-        self.assertIn(relative, agents)
+        template = self.target / ".agents/templates/AGENTS.md.template"
+        self.assertTrue(template.is_file())
+        self.assertIn(relative, template.read_text(encoding="utf-8"))
+        self.assertFalse((self.target / "AGENTS.md").exists())
 
         from scripts.check_markdown_links import validate_repository
 
@@ -99,7 +101,7 @@ class AideInstallTests(unittest.TestCase):
                 self.assertEqual(aide_install.source_path(".gitignore"), template)
                 self.assertEqual(aide_install.source_path(".gitignore").read_bytes(), template.read_bytes())
 
-    def test_existing_agents_and_gitignore_are_preserved_on_successful_apply(self):
+    def test_existing_agents_is_not_touched_by_installer(self):
         agents = self.target / "AGENTS.md"
         gitignore = self.target / ".gitignore"
         agents.write_text("custom agents\n", encoding="utf-8")
@@ -108,9 +110,30 @@ class AideInstallTests(unittest.TestCase):
         code, output = self.run_cli("--apply")
         self.assertEqual(code, 0)
         self.assertIn("統合案", output)
-        self.assertIn((aide_install.REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"), output)
         self.assertEqual(agents.read_text(encoding="utf-8"), "custom agents\n")
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "custom ignore\n")
+        self.assertEqual((self.target / ".agents/templates/AGENTS.md.template").read_bytes(),
+                         (aide_install.REPO_ROOT / ".agents/templates/AGENTS.md.template").read_bytes())
+
+    def test_manifest_installs_template_but_never_root_agents_file(self):
+        manifest = aide_install.load_manifest()
+        self.assertIn(".agents/templates/AGENTS.md.template", manifest)
+        self.assertNotIn("AGENTS.md", manifest)
+        self.assertEqual(self.run_cli("--apply")[0], 0)
+        self.assertFalse((self.target / "AGENTS.md").exists())
+
+    def test_agents_template_is_a_marked_copy_of_repository_guidance(self):
+        template = (aide_install.REPO_ROOT / ".agents/templates/AGENTS.md.template").read_bytes()
+        begin = b"<!-- BEGIN AIDE-MANAGED GUIDANCE -->\n"
+        end = b"<!-- END AIDE-MANAGED GUIDANCE -->\n"
+        self.assertTrue(template.startswith(begin))
+        self.assertTrue(template.endswith(end))
+        self.assertEqual(template.count(begin), 1)
+        self.assertEqual(template.count(end), 1)
+        self.assertEqual(
+            template[len(begin) : -len(end)].rstrip(b"\n"),
+            (aide_install.REPO_ROOT / "AGENTS.md").read_bytes().rstrip(b"\n"),
+        )
 
     def test_copy_failure_rolls_back_created_files_and_directories(self):
         real_open = aide_install.os.open
@@ -169,6 +192,7 @@ class AideInstallTests(unittest.TestCase):
         packages = json.loads(result.stdout)
         self.assertEqual(len(packages), 1)
         packaged_paths = {entry["path"] for entry in packages[0]["files"]}
+        self.assertNotIn("AGENTS.md", packaged_paths)
         for relative in aide_install.load_manifest():
             source = aide_install.source_path(relative).relative_to(aide_install.REPO_ROOT)
             if relative == ".gitignore":
