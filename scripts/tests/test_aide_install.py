@@ -69,6 +69,16 @@ class AideInstallTests(unittest.TestCase):
         self.assertNotIn(".agents/project.json", manifest)
         self.assertFalse(any("token" in path.lower() or ".env" in path for path in manifest))
 
+    def test_gitignore_template_fallback_is_available_for_npm_packages(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            template = root / "scripts/templates/gitignore"
+            template.parent.mkdir(parents=True)
+            template.write_bytes((aide_install.REPO_ROOT / "scripts/templates/gitignore").read_bytes())
+            with mock.patch.object(aide_install, "REPO_ROOT", root):
+                self.assertEqual(aide_install.source_path(".gitignore"), template)
+                self.assertEqual(aide_install.source_path(".gitignore").read_bytes(), template.read_bytes())
+
     def test_existing_agents_and_gitignore_are_preserved_on_successful_apply(self):
         agents = self.target / "AGENTS.md"
         gitignore = self.target / ".gitignore"

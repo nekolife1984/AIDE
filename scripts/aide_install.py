@@ -17,10 +17,22 @@ SPECIAL_FILES = {
     "AGENTS.md": "既存内容を保持します。AIDEの案内を追加する場合は、次を既存ルールに統合してください:\n\n# 開発ルール\n\n[開発ルール目次](.agents/docs/00_index.md)を参照\n",
     ".gitignore": "既存内容を保持します。必要に応じて次を既存ルールへ統合してください:\n\n# ローカル環境設定（例示ファイルは追跡可能）\n.env\n.env.*\n!.env.example\n",
 }
+SOURCE_FALLBACKS = {
+    ".gitignore": Path("scripts") / "templates" / "gitignore",
+}
 
 
 class InstallError(Exception):
     """A safe installation cannot be completed."""
+
+
+def source_path(relative: str) -> Path:
+    source = REPO_ROOT / relative
+    if source.is_file():
+        return source
+    fallback = SOURCE_FALLBACKS.get(relative)
+    fallback_path = REPO_ROOT / fallback if fallback else None
+    return fallback_path if fallback_path and fallback_path.is_file() else source
 
 
 def load_manifest() -> list[str]:
@@ -37,7 +49,7 @@ def load_manifest() -> list[str]:
         relative = Path(item)
         if relative.is_absolute() or ".." in relative.parts:
             raise InstallError(f"不正なマニフェストパス: {item}")
-        if not (REPO_ROOT / relative).is_file():
+        if not source_path(item).is_file():
             raise InstallError(f"コピー元が存在しません: {item}")
     return files
 
@@ -58,7 +70,7 @@ def classify(root: Path, files: list[str]) -> tuple[dict[str, str], list[str]]:
     statuses: dict[str, str] = {}
     conflicts: list[str] = []
     for relative in files:
-        source = REPO_ROOT / relative
+        source = source_path(relative)
         destination = safe_destination(root, relative)
         parent = destination.parent
         while parent != root and parent != parent.parent:
@@ -100,7 +112,7 @@ def install(root: Path, additions: list[str]) -> None:
                     created_dirs.append(current)
                 elif not current.is_dir():
                     raise InstallError(f"コピー先の親パスがディレクトリではありません: {current}")
-            data = (REPO_ROOT / relative).read_bytes()
+            data = source_path(relative).read_bytes()
             # O_EXCL prevents replacing a file created after the preflight check.
             fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
             created.append(destination)
@@ -145,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         if relative in SPECIAL_FILES and status == "統合案を提示（既存ファイルは保持）":
             print(SPECIAL_FILES[relative])
         elif relative in conflicts and (target / relative).is_file():
-            source_text = (REPO_ROOT / relative).read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+            source_text = source_path(relative).read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
             target_text = (target / relative).read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
             print("".join(difflib.unified_diff(target_text, source_text, fromfile="既存", tofile="AIDE提案")))
 

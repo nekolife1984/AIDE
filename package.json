@@ -9,10 +9,10 @@
     "bin/",
     "scripts/aide_install.py",
     "scripts/aide_install_manifest.json",
+    "scripts/templates/gitignore",
     ".agents/docs/",
     ".agents/skills/aide-init/SKILL.md",
     "AGENTS.md",
-    ".gitignore",
     "README.md"
   ],
   "engines": {
