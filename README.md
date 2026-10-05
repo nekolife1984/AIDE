@@ -45,28 +45,26 @@ AIエージェントにGitHub Projectの初期化を依頼し、提示された�
 
 ## 既存リポジトリへ導入する
 
-AIDEをGitHubテンプレートとして新規作成せず、既存リポジトリにAIDEの共通運用資料を追加する場合は、AIDEのclone内からPython 3.9以降で導入スクリプトを実行します。コピー対象は [`scripts/aide_install_manifest.json`](scripts/aide_install_manifest.json) に限定されています。`.agents/project.json`、認証情報、ローカルキャッシュは含まれません。
+AIDEをGitHubテンプレートとして新規作成せず、既存リポジトリにAIDEの共通運用資料を追加する場合は、`npx`から実行できます。コピー対象は [`scripts/aide_install_manifest.json`](scripts/aide_install_manifest.json) に限定され、`.agents/project.json`、認証情報、ローカルキャッシュは含まれません。
 
-まずdry-runで追加・同一・競合と、既存 `AGENTS.md` / `.gitignore` に対する統合案を確認します。dry-runはファイルを変更しません。
+Node.js 18以降とPython 3.9以降が必要です。まずdry-runで追加・同一・競合と、既存 `AGENTS.md` / `.gitignore` に対する統合案を確認します。dry-runはファイルを変更しません。
 
 ```sh
-python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --dry-run
+npx --yes --package=github:nekolife1984/AIDE aide-install /path/to/existing-repository --dry-run
 ```
 
 計画に問題がなければ、明示的に `--apply` を付けて適用します。
 
 ```sh
-python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --apply
-```
-
-Node.js 18以降とPython 3.9以降がある場合は、AIDEのcloneなしで `npx` から実行できます。最初にdry-runを確認し、適用する場合は `--apply` を付けます。
-
-```sh
-npx --yes --package=github:nekolife1984/AIDE aide-install /path/to/existing-repository --dry-run
 npx --yes --package=github:nekolife1984/AIDE aide-install /path/to/existing-repository --apply
 ```
 
-この方法では公開GitHubリポジトリからCLIを取得します。ネットワーク接続が必要です。
+この方法では公開GitHubリポジトリからCLIを取得します。ネットワーク接続が必要です。AIDEをclone済みの場合は、同梱のPythonスクリプトを直接実行することもできます。
+
+```sh
+python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --dry-run
+python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --apply
+```
 
 通常のコピー対象に競合が1件でもあれば、全件を表示して書き込みを停止します。競合ファイルを手動で退避または統合してから再実行してください。既存の `AGENTS.md` と `.gitignore` は変更せず、内容が異なる場合は出力された統合案を手動で取り込んでください。同一ファイルはそのまま保持され、再実行できます。
 
