@@ -10,6 +10,7 @@
     ".agents/docs/07-review.md",
     ".agents/docs/08-commit-messages.md",
     ".agents/skills/aide-init/SKILL.md",
+    ".agents/skills/aide-workflow/SKILL.md",
     "AGENTS.md",
     ".gitignore"
   ]
