@@ -9,29 +9,34 @@ AIコーディングエージェントと開発するリポジトリ向けのGit
 - Git
 - GitHub CLI（`gh`）と、対象リポジトリ・Projectを操作できるGitHubアカウント
 
-GitHubで **Use this template** を選んで自分のリポジトリを作成し、`<OWNER>`と`<REPOSITORY>`を置き換えてcloneします。
+GitHubで **Use this template** を選んで自分のリポジトリを作成します。GitHub.comなら`github.com`、GitHub Enterpriseなら自組織のホストを使い、`<OWNER>`と`<REPOSITORY>`を置き換えてcloneします。以降の認証ホスト・origin・Project URLも同じホストに揃えてください。
 
 ```sh
-git clone https://github.com/<OWNER>/<REPOSITORY>.git
+git clone https://<HOST>/<OWNER>/<REPOSITORY>.git
 cd <REPOSITORY>
 ```
 
 ### GitHub認証とProjectの初期化
 
-未認証の場合は、ブラウザーでGitHubにログインし、Project操作に必要な`project` scopeを付けます。
+未認証の場合は、ブラウザーでGitHubにログインし、Project操作に必要な`project` scopeを付けます。GitHub Enterpriseでは、認証・Project操作を同じホストに固定するため、先に`GH_HOST`を設定してください。
+
+GitHub Enterpriseを使う場合は、以下のようにホスト名を指定します。以降の`gh`コマンドでも`GH_HOST`を維持し、Repositoryの`origin`およびProject URLのホストが一致することを確認してください。不一致または認証不足の場合は操作を停止します。
+
+```sh
+export GH_HOST=github.example.com
+gh auth login --web --hostname "$GH_HOST" --scopes project
+gh auth status --hostname "$GH_HOST"
+# すでに認証済みでproject scopeが不足している場合のみ実行
+gh auth refresh --hostname "$GH_HOST" --scopes project
+```
+
+GitHub.comを使う場合のみ、`github.com`を指定して認証してください。認証後はscopeを確認し、すでに認証済みで`project` scopeが不足する場合だけ追加します。
 
 ```sh
 gh auth login --web --hostname github.com --scopes project
-```
-
-認証後は`gh auth status`でscopeを確認します。すでに認証済みで`project`が不足している場合だけ、追加します。
-
-```sh
-gh auth status
-```
-
-```sh
-gh auth refresh -h github.com -s project
+gh auth status --hostname github.com
+# すでに認証済みでproject scopeが不足している場合のみ実行
+gh auth refresh --hostname github.com --scopes project
 ```
 
 詳細：[初回認証（`gh auth login`）](https://cli.github.com/manual/gh_auth_login)、[認証状態の確認（`gh auth status`）](https://cli.github.com/manual/gh_auth_status)、[scopeの追加（`gh auth refresh`）](https://cli.github.com/manual/gh_auth_refresh)、[GitHub CLIのProject操作と必要なscope](https://cli.github.com/manual/gh_project)。
