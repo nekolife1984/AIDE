@@ -45,9 +45,9 @@ AIエージェントにGitHub Projectの初期化を依頼し、提示された�
 
 ## 既存リポジトリへ導入する
 
-AIDEをGitHubテンプレートとして新規作成せず、既存リポジトリにAIDEの共通運用資料を追加する場合は、`npx`から実行できます。コピー対象は [`scripts/aide_install_manifest.json`](scripts/aide_install_manifest.json) に限定され、`.agents/project.json`、認証情報、ローカルキャッシュは含まれません。
+AIDEをGitHubテンプレートとして新規作成せず、既存リポジトリにAIDEの共通運用資料を追加する場合は、`npx`から実行できます。コピー対象は [`scripts/aide_install_manifest.json`](scripts/aide_install_manifest.json) に限定され、`.agents/project.json`、`AGENTS.md`本体、認証情報、ローカルキャッシュは含まれません。`AGENTS.md`用の案内はテンプレートとして配布されます。
 
-Node.js 18以降とPython 3.9以降が必要です。まずdry-runで追加・同一・競合と、既存 `AGENTS.md` / `.gitignore` に対する統合案を確認します。dry-runはファイルを変更しません。
+Node.js 18以降とPython 3.9以降が必要です。まずdry-runで追加・同一・競合を確認します。dry-runはファイルを変更しません。インストーラーは導入先の `AGENTS.md` を作成・変更しません。
 
 ```sh
 npx --yes --package=github:nekolife1984/AIDE aide-install /path/to/existing-repository --dry-run
@@ -66,7 +66,7 @@ python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --dry
 python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --apply
 ```
 
-通常のコピー対象に競合が1件でもあれば、全件を表示して書き込みを停止します。競合ファイルを手動で退避または統合してから再実行してください。既存の `AGENTS.md` と `.gitignore` は変更せず、内容が異なる場合は出力された統合案を手動で取り込んでください。同一ファイルはそのまま保持され、再実行できます。
+通常のコピー対象に競合が1件でもあれば、全件を表示して書き込みを停止します。競合ファイルを手動で退避または統合してから再実行してください。`AGENTS.md`は配布されたテンプレートを使い、`aide-init`が変更案を提示して確認・承認を得てから作成または既存内容へ追記します。インストール時に `AGENTS.md` や `.gitignore` は変更せず、`.gitignore` の統合案だけを表示します。同一ファイルはそのまま保持され、再実行できます。
 
 ## 詳細
 
