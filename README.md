@@ -59,6 +59,15 @@ python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --dry
 python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --apply
 ```
 
+Node.js 18以降とPython 3.9以降がある場合は、AIDEのcloneなしで `npx` から実行できます。最初にdry-runを確認し、適用する場合は `--apply` を付けます。
+
+```sh
+npx --yes --package=github:nekolife1984/AIDE aide-install /path/to/existing-repository --dry-run
+npx --yes --package=github:nekolife1984/AIDE aide-install /path/to/existing-repository --apply
+```
+
+この方法では公開GitHubリポジトリからCLIを取得します。ネットワーク接続が必要です。
+
 通常のコピー対象に競合が1件でもあれば、全件を表示して書き込みを停止します。競合ファイルを手動で退避または統合してから再実行してください。既存の `AGENTS.md` と `.gitignore` は変更せず、内容が異なる場合は出力された統合案を手動で取り込んでください。同一ファイルはそのまま保持され、再実行できます。
 
 ## 詳細

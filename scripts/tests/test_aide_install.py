@@ -1,5 +1,7 @@
 import contextlib
 import io
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -103,6 +105,19 @@ class AideInstallTests(unittest.TestCase):
             with mock.patch.object(aide_install, "MANIFEST", manifest):
                 with self.assertRaises(aide_install.InstallError):
                     aide_install.load_manifest()
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required for CLI shim test")
+    def test_node_cli_shim_forwards_arguments_to_python_installer(self):
+        shim = aide_install.REPO_ROOT / "bin" / "aide-install.js"
+        result = subprocess.run(
+            ["node", str(shim), str(self.target), "--dry-run"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("dry-run", result.stdout)
+        self.assertEqual(list(self.target.iterdir()), [])
 
     def test_symlink_destination_is_rejected_before_writing(self):
         outside = self.target.parent / f"{self.target.name}-outside"
