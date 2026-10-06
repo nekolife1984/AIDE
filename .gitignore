@@ -2,3 +2,18 @@
 .env
 .env.*
 !.env.example
+
+# Pythonのバイトコード・キャッシュ
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# Pythonのローカル仮想環境
+.venv/
+venv/
+env/
+ENV/
