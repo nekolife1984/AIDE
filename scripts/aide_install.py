@@ -7,9 +7,7 @@ import argparse
 import difflib
 import json
 import os
-import shutil
 import sys
-import tempfile
 from pathlib import Path
 
 
@@ -128,13 +126,10 @@ def install(
     additions: list[str],
     migrations: list[tuple[str, str]],
     legacy_cleanup: list[str],
-) -> str | None:
+) -> None:
     created: list[Path] = []
     created_dirs: list[Path] = []
     moved: list[tuple[Path, Path, bytes | None]] = []
-    legacy_backups: list[tuple[Path, Path]] = []
-    backup_dir: Path | None = None
-    cleanup_warning: str | None = None
     try:
         for relative in additions:
             destination = safe_destination(root, relative)
@@ -166,27 +161,16 @@ def install(
             moved.append((source, destination, original))
             if original is not None:
                 destination.write_bytes(original.replace(b"../skills/", b"../../skills/"))
-        if legacy_cleanup:
-            backup_dir = Path(tempfile.mkdtemp(prefix=".aide-migration-", dir=root))
-            for index, relative in enumerate(legacy_cleanup):
-                source = safe_destination(root, relative)
-                backup = backup_dir / str(index)
-                os.replace(source, backup)
-                legacy_backups.append((source, backup))
+        for relative in legacy_cleanup:
+            safe_destination(root, relative).unlink(missing_ok=True)
     except (OSError, InstallError) as exc:
-        rollback_errors: list[str] = []
-        for source, backup in reversed(legacy_backups):
-            try:
-                os.replace(backup, source)
-            except OSError as rollback_exc:
-                rollback_errors.append(f"{source}: {rollback_exc}")
         for source, destination, original in reversed(moved):
             try:
                 if original is not None:
                     destination.write_bytes(original)
                 os.replace(destination, source)
-            except OSError as rollback_exc:
-                rollback_errors.append(f"{source}: {rollback_exc}")
+            except OSError:
+                pass
         for path in reversed(created):
             try:
                 path.unlink()
@@ -197,21 +181,7 @@ def install(
                 path.rmdir()
             except OSError:
                 pass
-        if backup_dir and not rollback_errors:
-            shutil.rmtree(backup_dir, ignore_errors=True)
-        if rollback_errors:
-            raise InstallError(
-                f"コピーに失敗しました。ロールバックにも失敗しました: {exc}; "
-                f"復元できなかったパス: {', '.join(rollback_errors)}; "
-                f"旧ファイルの退避先: {backup_dir}"
-            ) from exc
         raise InstallError(f"コピーに失敗しました。作成済みファイルをロールバックしました: {exc}") from exc
-    if backup_dir:
-        try:
-            shutil.rmtree(backup_dir)
-        except OSError as exc:
-            cleanup_warning = f"旧ファイルの一時退避先を削除できませんでした: {backup_dir} ({exc})"
-    return cleanup_warning
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -267,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         and safe_destination(target, new).is_file()
     ]
     try:
-        cleanup_warning = install(target, additions, migrations, legacy_cleanup)
+        install(target, additions, migrations, legacy_cleanup)
     except InstallError as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         return 2
@@ -275,8 +245,6 @@ def main(argv: list[str] | None = None) -> int:
         f"導入完了: {len(additions)}ファイルを追加、{len(migrations)}ファイルを移動、"
         f"{len(legacy_cleanup)}ファイルの旧配置を削除しました。"
     )
-    if cleanup_warning:
-        print(f"警告: {cleanup_warning}", file=sys.stderr)
     return 0
 
 
