@@ -108,19 +108,36 @@ class AideInstallTests(unittest.TestCase):
         real_replace = aide_install.os.replace
         calls = 0
 
-        def fail_on_second_replace(source, destination):
+        def fail_on_second_and_third_replace(source, destination):
             nonlocal calls
             calls += 1
-            if calls == 2:
+            if calls in {2, 3}:
                 raise OSError("simulated migration failure")
             return real_replace(source, destination)
 
-        with mock.patch.object(aide_install.os, "replace", side_effect=fail_on_second_replace):
+        with mock.patch.object(aide_install.os, "replace", side_effect=fail_on_second_and_third_replace):
             code, output = self.run_cli("--apply")
         self.assertEqual(code, 2)
-        self.assertIn("ロールバック", output)
-        self.assertTrue(all((self.target / old).is_file() for old in aide_install.LEGACY_DOCS))
-        self.assertFalse(any(self.target.glob(".aide-migration-*")))
+        self.assertIn("ロールバックにも失敗", output)
+        self.assertIn("旧ファイルの退避先", output)
+        backup_dirs = list(self.target.glob(".aide-migration-*"))
+        self.assertEqual(len(backup_dirs), 1)
+        self.assertEqual((backup_dirs[0] / "0").read_text(encoding="utf-8"), "obsolete copy\n")
+
+    def test_backup_cleanup_failure_is_reported(self):
+        self.assertEqual(self.run_cli("--apply")[0], 0)
+        for old in aide_install.LEGACY_DOCS:
+            legacy = self.target / old
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_text("obsolete copy\n", encoding="utf-8")
+
+        with mock.patch.object(aide_install.shutil, "rmtree", side_effect=OSError("cleanup failed")):
+            code, output = self.run_cli("--apply")
+        self.assertEqual(code, 0)
+        self.assertIn("一時退避先を削除できませんでした", output)
+        backup_dirs = list(self.target.glob(".aide-migration-*"))
+        self.assertEqual(len(backup_dirs), 1)
+        self.assertEqual((backup_dirs[0] / "0").read_text(encoding="utf-8"), "obsolete copy\n")
 
     def test_conflict_prevents_all_writes_and_shows_integration_proposals(self):
         (self.target / "AGENTS.md").write_text("custom agents\n", encoding="utf-8")
