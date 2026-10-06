@@ -1,13 +1,11 @@
-<!-- BEGIN AIDE-MANAGED GUIDANCE -->
-# 開発ルール
+## AIDEの利用案内
 
 ルールの正本は[開発ルール目次](.agents/docs/00_index.md)配下の文書です。
 
 - 開発作業では、[ブランチ](.agents/docs/01-branches.md)・[情報保護](.agents/docs/06-security.md)・[コミット](.agents/docs/08-commit-messages.md)の共通ルールを確認してください。
 - Issueの起票・対応、開発変更、レビュー、作業の再開・中断では、[aide-workflowスキル](.agents/skills/aide-workflow/SKILL.md)を読み、該当工程の文書・節を確認してから操作してください。工程別の参照は、共通ルールを省略するためのものではありません。
 
-## GitHub Project
+### GitHub Project
 
 - GitHub Project情報は `.agents/project.json` を参照
 - ファイルがないか `project` が `null` の場合は、[aide-initスキル](.agents/skills/aide-init/SKILL.md)でセットアップ
-<!-- END AIDE-MANAGED GUIDANCE -->
