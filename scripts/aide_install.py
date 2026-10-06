@@ -19,6 +19,20 @@ SPECIAL_FILES = {
 SOURCE_FALLBACKS = {
     ".gitignore": Path("scripts") / "templates" / "gitignore",
 }
+LEGACY_DOCS = {
+    f".agents/docs/{name}.md": f".agents/docs/aide/{name}.md"
+    for name in (
+        "00_index",
+        "01-branches",
+        "02-issues",
+        "03-project",
+        "04-workflow",
+        "05-quality",
+        "06-security",
+        "07-review",
+        "08-commit-messages",
+    )
+}
 
 
 class InstallError(Exception):
@@ -68,9 +82,12 @@ def safe_destination(root: Path, relative: str) -> Path:
 def classify(root: Path, files: list[str]) -> tuple[dict[str, str], list[str]]:
     statuses: dict[str, str] = {}
     conflicts: list[str] = []
+    legacy_sources = {new: old for old, new in LEGACY_DOCS.items()}
     for relative in files:
         source = source_path(relative)
         destination = safe_destination(root, relative)
+        legacy = legacy_sources.get(relative)
+        legacy_path = safe_destination(root, legacy) if legacy else None
         parent = destination.parent
         while parent != root and parent != parent.parent:
             if parent.exists() and not parent.is_dir():
@@ -79,6 +96,13 @@ def classify(root: Path, files: list[str]) -> tuple[dict[str, str], list[str]]:
                 break
             parent = parent.parent
         if relative in statuses:
+            continue
+        if not destination.exists() and legacy_path and legacy_path.exists():
+            if not legacy_path.is_file():
+                statuses[relative] = "競合（旧配置が通常ファイルではありません）"
+                conflicts.append(relative)
+            else:
+                statuses[relative] = f"移動（{legacy}）"
             continue
         if not destination.exists():
             statuses[relative] = "追加"
@@ -97,9 +121,15 @@ def classify(root: Path, files: list[str]) -> tuple[dict[str, str], list[str]]:
     return statuses, conflicts
 
 
-def install(root: Path, additions: list[str]) -> None:
+def install(
+    root: Path,
+    additions: list[str],
+    migrations: list[tuple[str, str]],
+    legacy_cleanup: list[str],
+) -> None:
     created: list[Path] = []
     created_dirs: list[Path] = []
+    moved: list[tuple[Path, Path, bytes | None]] = []
     try:
         for relative in additions:
             destination = safe_destination(root, relative)
@@ -117,7 +147,30 @@ def install(root: Path, additions: list[str]) -> None:
             created.append(destination)
             with os.fdopen(fd, "wb") as output:
                 output.write(data)
+        for old, new in migrations:
+            source = safe_destination(root, old)
+            destination = safe_destination(root, new)
+            current = root
+            for part in Path(new).parts[:-1]:
+                current = current / part
+                if not current.exists():
+                    current.mkdir()
+                    created_dirs.append(current)
+            original = source.read_bytes() if old == ".agents/docs/00_index.md" else None
+            os.replace(source, destination)
+            moved.append((source, destination, original))
+            if original is not None:
+                destination.write_bytes(original.replace(b"../skills/", b"../../skills/"))
+        for relative in legacy_cleanup:
+            safe_destination(root, relative).unlink(missing_ok=True)
     except (OSError, InstallError) as exc:
+        for source, destination, original in reversed(moved):
+            try:
+                if original is not None:
+                    destination.write_bytes(original)
+                os.replace(destination, source)
+            except OSError:
+                pass
         for path in reversed(created):
             try:
                 path.unlink()
@@ -171,12 +224,27 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     additions = [path for path, status in statuses.items() if status == "追加"]
+    migrations = [
+        (old, new)
+        for old, new in LEGACY_DOCS.items()
+        if statuses.get(new, "").startswith("移動（")
+    ]
+    migration_sources = {old for old, _ in migrations}
+    legacy_cleanup = [
+        old
+        for old, new in LEGACY_DOCS.items()
+        if old not in migration_sources and safe_destination(target, old).is_file()
+        and safe_destination(target, new).is_file()
+    ]
     try:
-        install(target, additions)
+        install(target, additions, migrations, legacy_cleanup)
     except InstallError as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         return 2
-    print(f"導入完了: {len(additions)}ファイルを追加しました。")
+    print(
+        f"導入完了: {len(additions)}ファイルを追加、{len(migrations)}ファイルを移動、"
+        f"{len(legacy_cleanup)}ファイルの旧配置を削除しました。"
+    )
     return 0
 
 
