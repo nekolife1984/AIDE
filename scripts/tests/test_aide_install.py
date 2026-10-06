@@ -139,6 +139,8 @@ class AideInstallTests(unittest.TestCase):
         self.assertIn("管理タグは `AGENTS.md` に出力しない", skill)
         self.assertIn("見出し階層", skill)
         self.assertIn("以前のコメントタグ", skill)
+        self.assertIn("旧案内本文と末尾の改行だけを正規化して完全一致", skill)
+        self.assertIn("部分一致、追記・編集済み", skill)
         self.assertIn("既存の案内外の記載が保たれている", skill)
 
     def test_copy_failure_rolls_back_created_files_and_directories(self):
