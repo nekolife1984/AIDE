@@ -60,8 +60,12 @@ gh auth refresh --hostname github.com --scopes project
 
 1. 対象ホストを固定し、全ての`gh`認証確認・検索・取得・作成・更新・読み戻しに同一の`GH_HOST`、または各コマンド対応時の同一`--hostname`を適用する。`GH_HOST`が空や意図しない値でないことを確認し、指定ホストの`gh auth status`が成功し、対象アカウントにProject操作権限があることを確認する。`origin`・認証先・`.agents/project.json`を照合する。有効な未設定状態は`repository: null`、`project: null`、`project_defaults: {title: null, visibility: PRIVATE}`の組合せだけ。それ以外は保存済み情報をGitHubと比較し、不完全な設定や不一致は停止する。
 2. `project`が未設定なら、前項で固定・検証したホストに対するProject検索でRepositoryにリンク済みの候補を探す。取得したProject URLのホストも指定ホストと完全一致することを確認する。GitHub EnterpriseではAPI/CLIの検索結果、Project URL、Repository originのいずれかが別ホストを指す場合、GitHub.comへ誤接続する可能性があるため停止し、読み書きを行わない。同名の未リンクProjectは、同じ可視性で空の場合のみ再利用する。候補の重複・閉鎖・Issue無効・owner/Repository不一致・取得不完全なら停止する。
-3. 対象と変更計画を提示して承認を待ち、その後にだけProject作成・リンク・Status設定を行う。Public作成と、項目があるProjectのStatus変更には、通常承認とは別に影響を示した明示承認を得る。GitHub既定optionは対応を確認して移行し、未知optionは上書きしない。
-4. 同じ対象ホストからRepositoryリンク・Project URLのホスト・可視性・Status/options・項目数（アーカイブ済みを含む）を読み戻して照合した後、`.agents/project.json`を更新・読み戻し検証する。`repository`が未設定の場合は検証済みのoriginで初期化し、既存の不一致は停止する。失敗・判断不能時は書き込みを続けない。
+3. 対象と変更計画を提示して承認を待ち、その後にだけProject作成・リンク・Status設定を行う。Public作成と、項目があるProjectのStatus option変更には、通常承認とは別に、対象option・既存項目への影響を示した明示承認を得る。Statusの正とする選択肢は[Project管理](../../docs/aide/03-project.md#status)の5つ（`Backlog`、`Ready`、`In progress`、`In review`、`Done`）。
+   - Project作成・Repositoryリンク直後にStatus fieldを読み戻す。fieldがなければ、`gh project field-create <number> --owner <owner> --name Status --data-type SINGLE_SELECT --single-select-options 'Backlog,Ready,In progress,In review,Done'`で作成し、成功応答だけで完了とせず読み戻す。作成エラーや競合時は再作成せず、fieldを読み戻して状態を判定する。
+   - fieldが既にある場合はそのoption一覧（ID・名前・色・説明）を読み取る。GitHub標準option `Todo` は `Backlog`、`In Progress` は `In progress`、`Done` は `Done` へ対応させる。移行先が既に存在する場合や、対応関係が一意でない場合は自動変更せず停止して確認する。`Ready`と`In review`など不足する正規optionは追加する。既存optionのID・色・説明と未知optionは保持し、未知optionを削除・改名しない。
+   - `gh project field-edit`は存在しないため、既存fieldのoption更新は、対象ホストのGitHub GraphQL `updateProjectV2Field` mutationで行う。現在の全optionを読み戻し、既存optionのID・色・説明を保持した完全なoption配列に、承認済みの改名・追加だけを反映して送る。option IDを省略したり、未取得のoptionを配列から落としたりしない。mutationのエラー、結果不明、読み戻し不一致があれば再送・続行せず停止する。
+   - 対象Projectに項目（アーカイブ済みを含む）がある場合、optionの追加・改名はいずれも個別の明示承認がない限り実行しない。承認が得られない場合はProject作成・リンク等の承認済み作業までに留め、Status未設定／未整合として報告する。
+4. 同じ対象ホストからRepositoryリンク・Project URLのホスト・可視性・Status fieldと全option（ID・名前）・項目数（アーカイブ済みを含む）を読み戻して照合する。5つの正規optionが全て存在し、承認なく未知optionを変更していないことを確認する。optionの不足、予期しない変更、読み戻し不能があれば成功扱いにせず、`.agents/project.json`を更新しない。照合後にのみ`.agents/project.json`を更新・読み戻し検証する。`repository`が未設定の場合は検証済みのoriginで初期化し、既存の不一致は停止する。失敗・判断不能時は書き込みを続けない。
 
 `.agents/project.json`はGit管理対象の共有設定で、変更は作業ツリーに現れる。公開リポジトリでは内容も公開される。Private Projectの識別情報を記載する場合は、対象の公開Repositoryと公開する識別情報を示し、書き込む前に別途明示承認を得る。
 
