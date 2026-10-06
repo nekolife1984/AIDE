@@ -70,7 +70,7 @@ class AideInstallTests(unittest.TestCase):
     def test_conflict_prevents_all_writes_and_shows_integration_proposals(self):
         (self.target / "AGENTS.md").write_text("custom agents\n", encoding="utf-8")
         (self.target / ".gitignore").write_text("custom ignore\n", encoding="utf-8")
-        conflict_path = " .agents/docs/00_index.md".strip()
+        conflict_path = " .agents/docs/aide/00_index.md".strip()
         conflict = self.target / conflict_path
         conflict.parent.mkdir(parents=True)
         conflict.write_text("custom index\n", encoding="utf-8")
@@ -83,7 +83,7 @@ class AideInstallTests(unittest.TestCase):
         self.assertEqual((self.target / ".gitignore").read_text(encoding="utf-8"), "custom ignore\n")
         self.assertEqual(
             {path.relative_to(self.target) for path in self.target.rglob("*.md")},
-            {Path("AGENTS.md"), Path(".agents/docs/00_index.md")},
+            {Path("AGENTS.md"), Path(".agents/docs/aide/00_index.md")},
         )
 
     def test_project_configuration_and_secrets_are_not_in_manifest(self):

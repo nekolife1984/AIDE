@@ -1,6 +1,6 @@
 # 資料目次
 
-以下の文書を開発ルールの正本とし、工程の実行順序と参照先は[aide-workflowスキル](../skills/aide-workflow/SKILL.md)で案内します。
+以下の文書を開発ルールの正本とし、工程の実行順序と参照先は[aide-workflowスキル](../../skills/aide-workflow/SKILL.md)で案内します。
 
 | 資料 | 内容 |
 |---|---|
