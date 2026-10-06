@@ -122,18 +122,24 @@ class AideInstallTests(unittest.TestCase):
         self.assertEqual(self.run_cli("--apply")[0], 0)
         self.assertFalse((self.target / "AGENTS.md").exists())
 
-    def test_agents_template_is_a_marked_copy_of_repository_guidance(self):
-        template = (aide_install.REPO_ROOT / ".agents/templates/AGENTS.md.template").read_bytes()
-        begin = b"<!-- BEGIN AIDE-MANAGED GUIDANCE -->\n"
-        end = b"<!-- END AIDE-MANAGED GUIDANCE -->\n"
-        self.assertTrue(template.startswith(begin))
-        self.assertTrue(template.endswith(end))
-        self.assertEqual(template.count(begin), 1)
-        self.assertEqual(template.count(end), 1)
-        self.assertEqual(
-            template[len(begin) : -len(end)].rstrip(b"\n"),
-            (aide_install.REPO_ROOT / "AGENTS.md").read_bytes().rstrip(b"\n"),
+    def test_agents_template_is_a_tag_free_markdown_section(self):
+        template = (aide_install.REPO_ROOT / ".agents/templates/AGENTS.md.template").read_text(
+            encoding="utf-8"
         )
+        self.assertTrue(template.startswith("## AIDEの利用案内\n"))
+        self.assertIn("### GitHub Project\n", template)
+        self.assertNotIn("<!--", template)
+        self.assertNotIn("-->", template)
+        self.assertNotIn("# 開発ルール", template)
+
+    def test_aide_init_describes_tag_free_hierarchy_aware_section_management(self):
+        skill = (aide_install.REPO_ROOT / ".agents/skills/aide-init/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("管理タグは `AGENTS.md` に出力しない", skill)
+        self.assertIn("見出し階層", skill)
+        self.assertIn("以前のコメントタグ", skill)
+        self.assertIn("既存の案内外の記載が保たれている", skill)
 
     def test_copy_failure_rolls_back_created_files_and_directories(self):
         real_open = aide_install.os.open
