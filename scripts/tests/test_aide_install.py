@@ -67,10 +67,41 @@ class AideInstallTests(unittest.TestCase):
         after = {p.relative_to(self.target): p.read_bytes() for p in self.target.rglob("*") if p.is_file()}
         self.assertEqual(before, after)
 
+    def test_rerun_moves_legacy_docs_and_removes_duplicate_old_paths(self):
+        for old, new in aide_install.LEGACY_DOCS.items():
+            legacy = self.target / old
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            content = (aide_install.REPO_ROOT / new).read_bytes()
+            if old.endswith("00_index.md"):
+                content = content.replace(b"../../skills/", b"../skills/")
+            legacy.write_bytes(content)
+
+        code, output = self.run_cli("--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("移動", output)
+        self.assertTrue((self.target / ".agents/docs/00_index.md").is_file())
+
+        code, _ = self.run_cli("--apply")
+        self.assertEqual(code, 0)
+        self.assertFalse((self.target / ".agents/docs/00_index.md").exists())
+        self.assertEqual(
+            (self.target / ".agents/docs/aide/00_index.md").read_bytes(),
+            (aide_install.REPO_ROOT / ".agents/docs/aide/00_index.md").read_bytes(),
+        )
+
+        # Recreate obsolete duplicates to verify an upgrade removes old paths.
+        for old in aide_install.LEGACY_DOCS:
+            legacy = self.target / old
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_text("obsolete copy\n", encoding="utf-8")
+        code, _ = self.run_cli("--apply")
+        self.assertEqual(code, 0)
+        self.assertFalse(any((self.target / old).exists() for old in aide_install.LEGACY_DOCS))
+
     def test_conflict_prevents_all_writes_and_shows_integration_proposals(self):
         (self.target / "AGENTS.md").write_text("custom agents\n", encoding="utf-8")
         (self.target / ".gitignore").write_text("custom ignore\n", encoding="utf-8")
-        conflict_path = " .agents/docs/00_index.md".strip()
+        conflict_path = " .agents/docs/aide/00_index.md".strip()
         conflict = self.target / conflict_path
         conflict.parent.mkdir(parents=True)
         conflict.write_text("custom index\n", encoding="utf-8")
@@ -83,7 +114,7 @@ class AideInstallTests(unittest.TestCase):
         self.assertEqual((self.target / ".gitignore").read_text(encoding="utf-8"), "custom ignore\n")
         self.assertEqual(
             {path.relative_to(self.target) for path in self.target.rglob("*.md")},
-            {Path("AGENTS.md"), Path(".agents/docs/00_index.md")},
+            {Path("AGENTS.md"), Path(".agents/docs/aide/00_index.md")},
         )
 
     def test_project_configuration_and_secrets_are_not_in_manifest(self):
