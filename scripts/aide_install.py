@@ -7,7 +7,9 @@ import argparse
 import difflib
 import json
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -130,6 +132,8 @@ def install(
     created: list[Path] = []
     created_dirs: list[Path] = []
     moved: list[tuple[Path, Path, bytes | None]] = []
+    legacy_backups: list[tuple[Path, Path]] = []
+    backup_dir: Path | None = None
     try:
         for relative in additions:
             destination = safe_destination(root, relative)
@@ -161,9 +165,19 @@ def install(
             moved.append((source, destination, original))
             if original is not None:
                 destination.write_bytes(original.replace(b"../skills/", b"../../skills/"))
-        for relative in legacy_cleanup:
-            safe_destination(root, relative).unlink(missing_ok=True)
+        if legacy_cleanup:
+            backup_dir = Path(tempfile.mkdtemp(prefix=".aide-migration-", dir=root))
+            for index, relative in enumerate(legacy_cleanup):
+                source = safe_destination(root, relative)
+                backup = backup_dir / str(index)
+                os.replace(source, backup)
+                legacy_backups.append((source, backup))
     except (OSError, InstallError) as exc:
+        for source, backup in reversed(legacy_backups):
+            try:
+                os.replace(backup, source)
+            except OSError:
+                pass
         for source, destination, original in reversed(moved):
             try:
                 if original is not None:
@@ -181,7 +195,11 @@ def install(
                 path.rmdir()
             except OSError:
                 pass
+        if backup_dir:
+            shutil.rmtree(backup_dir, ignore_errors=True)
         raise InstallError(f"コピーに失敗しました。作成済みファイルをロールバックしました: {exc}") from exc
+    if backup_dir:
+        shutil.rmtree(backup_dir, ignore_errors=True)
 
 
 def main(argv: list[str] | None = None) -> int:

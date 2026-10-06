@@ -98,6 +98,30 @@ class AideInstallTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(any((self.target / old).exists() for old in aide_install.LEGACY_DOCS))
 
+    def test_legacy_cleanup_failure_restores_all_old_paths(self):
+        self.assertEqual(self.run_cli("--apply")[0], 0)
+        for old in aide_install.LEGACY_DOCS:
+            legacy = self.target / old
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_text("obsolete copy\n", encoding="utf-8")
+
+        real_replace = aide_install.os.replace
+        calls = 0
+
+        def fail_on_second_replace(source, destination):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("simulated migration failure")
+            return real_replace(source, destination)
+
+        with mock.patch.object(aide_install.os, "replace", side_effect=fail_on_second_replace):
+            code, output = self.run_cli("--apply")
+        self.assertEqual(code, 2)
+        self.assertIn("ロールバック", output)
+        self.assertTrue(all((self.target / old).is_file() for old in aide_install.LEGACY_DOCS))
+        self.assertFalse(any(self.target.glob(".aide-migration-*")))
+
     def test_conflict_prevents_all_writes_and_shows_integration_proposals(self):
         (self.target / "AGENTS.md").write_text("custom agents\n", encoding="utf-8")
         (self.target / ".gitignore").write_text("custom ignore\n", encoding="utf-8")
