@@ -47,7 +47,7 @@ class AideInstallTests(unittest.TestCase):
         skill = self.target / relative
         self.assertTrue(skill.is_file())
         self.assertEqual(skill.read_bytes(), (aide_install.REPO_ROOT / relative).read_bytes())
-        template = self.target / ".agents/templates/AGENTS.md.template"
+        template = self.target / ".agents/templates/aide/AGENTS.md.template"
         self.assertTrue(template.is_file())
         self.assertIn(relative, template.read_text(encoding="utf-8"))
         self.assertFalse((self.target / "AGENTS.md").exists())
@@ -143,18 +143,18 @@ class AideInstallTests(unittest.TestCase):
         self.assertIn("統合案", output)
         self.assertEqual(agents.read_text(encoding="utf-8"), "custom agents\n")
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "custom ignore\n")
-        self.assertEqual((self.target / ".agents/templates/AGENTS.md.template").read_bytes(),
-                         (aide_install.REPO_ROOT / ".agents/templates/AGENTS.md.template").read_bytes())
+        self.assertEqual((self.target / ".agents/templates/aide/AGENTS.md.template").read_bytes(),
+                         (aide_install.REPO_ROOT / ".agents/templates/aide/AGENTS.md.template").read_bytes())
 
     def test_manifest_installs_template_but_never_root_agents_file(self):
         manifest = aide_install.load_manifest()
-        self.assertIn(".agents/templates/AGENTS.md.template", manifest)
+        self.assertIn(".agents/templates/aide/AGENTS.md.template", manifest)
         self.assertNotIn("AGENTS.md", manifest)
         self.assertEqual(self.run_cli("--apply")[0], 0)
         self.assertFalse((self.target / "AGENTS.md").exists())
 
     def test_agents_template_is_a_tag_free_markdown_section(self):
-        template = (aide_install.REPO_ROOT / ".agents/templates/AGENTS.md.template").read_text(
+        template = (aide_install.REPO_ROOT / ".agents/templates/aide/AGENTS.md.template").read_text(
             encoding="utf-8"
         )
         self.assertTrue(template.startswith("## AIDEの利用案内\n"))
@@ -230,7 +230,8 @@ class AideInstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         packages = json.loads(result.stdout)
         self.assertEqual(len(packages), 1)
-        packaged_paths = {entry["path"] for entry in packages[0]["files"]}
+        package = packages[0] if isinstance(packages, list) else next(iter(packages.values()))
+        packaged_paths = {entry["path"] for entry in package["files"]}
         self.assertNotIn("AGENTS.md", packaged_paths)
         for relative in aide_install.load_manifest():
             source = aide_install.source_path(relative).relative_to(aide_install.REPO_ROOT)
