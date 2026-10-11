@@ -155,6 +155,12 @@ class AideInstallTests(unittest.TestCase):
         self.assertIn("trackedな`.agents/project.json`", skill)
         self.assertIn("ローカル設定がない場合だけ", skill)
 
+    def test_root_agents_guides_local_project_config_precedence(self):
+        agents = (aide_install.REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+        self.assertIn(".agents/project.local.json` があればそれを", agents)
+        self.assertIn("なければテンプレート設定 `.agents/project.json`", agents)
+
     def test_gitignore_template_fallback_is_available_for_npm_packages(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
