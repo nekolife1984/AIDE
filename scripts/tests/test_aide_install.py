@@ -155,6 +155,30 @@ class AideInstallTests(unittest.TestCase):
         self.assertIn("trackedな`.agents/project.json`", skill)
         self.assertIn("ローカル設定がない場合だけ", skill)
 
+    def test_aide_init_fails_closed_and_protects_local_config(self):
+        skill = (aide_install.REPO_ROOT / ".agents/skills/aide-init/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        contracts = (
+            "ローカル設定が存在するのに不完全・不正・origin不一致なら"
+            "テンプレートへフォールバックせず停止する",
+            "mode `0600`",
+            "git check-ignore -q --no-index -- .agents/project.local.json",
+            "ローカル設定をIssue、PR、ログ、installer/NPM配布物へ出力しない",
+        )
+
+        for contract in contracts:
+            with self.subTest(contract=contract):
+                self.assertIn(contract, skill)
+
+    def test_aide_init_limits_project_url_reporting_to_user_response(self):
+        skill = (aide_install.REPO_ROOT / ".agents/skills/aide-init/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Project URLをユーザーへの直接応答でのみ報告する", skill)
+        self.assertIn("Issue・PR・ログにはProject URLやローカル設定値を記録せず", skill)
+
     def test_root_agents_guides_local_project_config_precedence(self):
         agents = (aide_install.REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
