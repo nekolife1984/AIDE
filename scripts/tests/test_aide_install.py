@@ -120,7 +120,70 @@ class AideInstallTests(unittest.TestCase):
     def test_project_configuration_and_secrets_are_not_in_manifest(self):
         manifest = aide_install.load_manifest()
         self.assertNotIn(".agents/project.json", manifest)
+        self.assertNotIn(".agents/project.local.json", manifest)
         self.assertFalse(any("token" in path.lower() or ".env" in path for path in manifest))
+
+    def test_tracked_project_config_is_neutral_template(self):
+        import json
+
+        config = json.loads((aide_install.REPO_ROOT / ".agents/project.json").read_text(encoding="utf-8"))
+        self.assertTrue(config.get("repository") is None)
+        self.assertTrue(config.get("project") is None)
+        self.assertEqual(config.get("project_defaults"), {"title": None, "visibility": "PRIVATE"})
+
+    def test_local_project_config_is_ignored_and_gitignore_proposal_includes_it(self):
+        relative = ".agents/project.local.json"
+        ignore_text = (aide_install.REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+        template_text = (aide_install.REPO_ROOT / "scripts/templates/gitignore").read_text(encoding="utf-8")
+
+        self.assertIn(relative, ignore_text)
+        self.assertIn(relative, template_text)
+        self.assertIn(relative, aide_install.SPECIAL_FILES[".gitignore"])
+        result = subprocess.run(
+            ["git", "check-ignore", "--no-index", "-q", "--", relative],
+            cwd=aide_install.REPO_ROOT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+
+    def test_aide_init_documents_local_project_config_precedence(self):
+        skill = (aide_install.REPO_ROOT / ".agents/skills/aide-init/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(".agents/project.local.json", skill)
+        self.assertIn("trackedな`.agents/project.json`", skill)
+        self.assertIn("ローカル設定がない場合だけ", skill)
+
+    def test_aide_init_fails_closed_and_protects_local_config(self):
+        skill = (aide_install.REPO_ROOT / ".agents/skills/aide-init/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        contracts = (
+            "ローカル設定が存在するのに不完全・不正・origin不一致なら"
+            "テンプレートへフォールバックせず停止する",
+            "mode `0600`",
+            "git check-ignore -q --no-index -- .agents/project.local.json",
+            "ローカル設定をIssue、PR、ログ、installer/NPM配布物へ出力しない",
+        )
+
+        for contract in contracts:
+            with self.subTest(contract=contract):
+                self.assertIn(contract, skill)
+
+    def test_aide_init_limits_project_url_reporting_to_user_response(self):
+        skill = (aide_install.REPO_ROOT / ".agents/skills/aide-init/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Project URLをユーザーへの直接応答でのみ報告する", skill)
+        self.assertIn("Issue・PR・ログにはProject URLやローカル設定値を記録せず", skill)
+
+    def test_root_agents_guides_local_project_config_precedence(self):
+        agents = (aide_install.REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+        self.assertIn(".agents/project.local.json` があればそれを", agents)
+        self.assertIn("なければテンプレート設定 `.agents/project.json`", agents)
 
     def test_gitignore_template_fallback_is_available_for_npm_packages(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -233,6 +296,8 @@ class AideInstallTests(unittest.TestCase):
         package = packages[0] if isinstance(packages, list) else next(iter(packages.values()))
         packaged_paths = {entry["path"] for entry in package["files"]}
         self.assertNotIn("AGENTS.md", packaged_paths)
+        self.assertNotIn(".agents/project.json", packaged_paths)
+        self.assertNotIn(".agents/project.local.json", packaged_paths)
         for relative in aide_install.load_manifest():
             source = aide_install.source_path(relative).relative_to(aide_install.REPO_ROOT)
             if relative == ".gitignore":

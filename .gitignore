@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# cloneごとのGitHub Project設定
+/.agents/project.local.json
+
 # Pythonのバイトコード・キャッシュ
 __pycache__/
 *.py[cod]

@@ -7,5 +7,5 @@
 
 ### GitHub Project
 
-- GitHub Project情報は `.agents/project.json` を参照
-- ファイルがないか `project` が `null` の場合は、[aide-initスキル](.agents/skills/aide-init/SKILL.md)でセットアップ
+- GitHub Project情報は `.agents/project.local.json` があればそれを、なければテンプレート設定 `.agents/project.json` を参照
+- ローカル設定がなくテンプレート設定の `project` が `null` の場合は、[aide-initスキル](.agents/skills/aide-init/SKILL.md)で初期化

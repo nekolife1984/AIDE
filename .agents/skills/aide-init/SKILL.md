@@ -5,7 +5,7 @@ description: Use when initializing or reconciling a repository's GitHub Project 
 
 # AIDE Init: GitHub Project
 
-Pythonを使えない環境でも、AIエージェントがGitHub CLIで対象RepositoryのIssue Projectを確認・初期化し、`.agents/project.json`を作成できるようにする。GitHubの実状態を確認してから必要な変更だけを行い、最後にGitHubとJSONを読み戻して一致を検証する。
+Pythonを使えない環境でも、AIエージェントがGitHub CLIで対象RepositoryのIssue Projectを確認・初期化し、clone固有の`.agents/project.local.json`を作成できるようにする。trackedな`.agents/project.json`は中立なテンプレート設定として読み取り専用にし、ライブ設定を書かない。GitHubの実状態を確認してから必要な変更だけを行い、最後にGitHubとローカルJSONを読み戻して一致を検証する。
 
 ## AGENTS.md案内の初期化
 
@@ -25,8 +25,8 @@ Pythonを使えない環境でも、AIエージェントがGitHub CLIで対象Re
 
    ## GitHub Project
 
-   - GitHub Project情報は `.agents/project.json` を参照
-   - ファイルがないか `project` が `null` の場合は、[aide-initスキル](.agents/skills/aide-init/SKILL.md)でセットアップ
+   - GitHub Project情報は `.agents/project.local.json` があればそれを、なければテンプレート設定 `.agents/project.json` を参照
+   - ローカル設定がなくテンプレート設定の `project` が `null` の場合は、[aide-initスキル](.agents/skills/aide-init/SKILL.md)で初期化
    ```
 
    案内削除を依頼された場合も、削除対象セクションと残る文書の差分を示し、明示承認を得てから削除する。以前のコメントタグによる管理ブロックがある場合は、タグの組が一組で順序も正しいことを確認し、ブロック内だけをこのセクションに置き換えてタグを取り除く。タグの欠落・重複・逆順、または同名見出しとの重複があれば推測で修復せず停止する。
@@ -42,7 +42,7 @@ Pythonを使えない環境でも、AIエージェントがGitHub CLIで対象Re
 
 ### 主作業ツリーのプリフライト
 
-Repository rootで、GitHub CLIの認証確認・Project検索・作成・リンク・Status変更・`.agents/project.json`書き込みより前に、次の確認を行う。`aide-init`は主作業ツリーからのみ実行し、リンク作業ツリーでは実行しない。
+Repository rootで、GitHub CLIの認証確認・Project検索・作成・リンク・Status変更・`.agents/project.local.json`書き込みより前に、次の確認を行う。`aide-init`は主作業ツリーからのみ実行し、リンク作業ツリーでは実行しない。`.agents/project.json`は追跡対象のテンプレート設定であり、書き換えない。
 
 ```sh
 if ! is_bare=$(git rev-parse --is-bare-repository 2>/dev/null); then
@@ -89,22 +89,22 @@ gh auth refresh --hostname github.com --scopes project
 
 コマンド実行前に、`GH_HOST`（または明示したhostname）、`gh auth status`の対象アカウント、Repositoryの`origin` URLのホストが一致することを確認する。originは秘密情報を出さない形式で取得し、HTTPSならURLのauthority、SSHなら`[user@]host:path`のhost部分を比較する。GitHub.com利用時はoriginが`github.com`でなければ停止する。Enterprise利用時はoriginが指定ホストと完全一致しなければ停止する。URLの形式が判別不能、ホストが曖昧、認証が別ホストにしかない場合も停止し、ホストを推測したりGitHub.comへ切り替えたりしない。
 
-1. 対象ホストを固定し、全ての`gh`認証確認・検索・取得・作成・更新・読み戻しに同一の`GH_HOST`、または各コマンド対応時の同一`--hostname`を適用する。`GH_HOST`が空や意図しない値でないことを確認し、指定ホストの`gh auth status`が成功し、対象アカウントにProject操作権限があることを確認する。`origin`・認証先・`.agents/project.json`を照合する。有効な未設定状態は`repository: null`、`project: null`、`project_defaults: {title: null, visibility: PRIVATE}`の組合せだけ。それ以外は保存済み情報をGitHubと比較し、不完全な設定や不一致は停止する。
+1. 対象ホストを固定し、全ての`gh`認証確認・検索・取得・作成・更新・読み戻しに同一の`GH_HOST`、または各コマンド対応時の同一`--hostname`を適用する。`GH_HOST`が空や意図しない値でないことを確認し、指定ホストの`gh auth status`が成功し、対象アカウントにProject操作権限があることを確認する。`origin`・認証先・両設定ファイルを照合する。trackedな`.agents/project.json`は通常ファイルで、有効なテンプレート値（`repository: null`、`project: null`、`project_defaults: {title: null, visibility: PRIVATE}`）でなければ停止する。`.agents/project.local.json`が存在する場合は通常ファイルでmode `0600`、完全なschemaを持ち、保存値をGitHubと照合する。ローカル設定が存在するのに不完全・不正・origin不一致ならテンプレートへフォールバックせず停止する。ローカル設定がない場合だけ、テンプレート値を初期化の既定値として使う。書き込み前に`git check-ignore -q --no-index -- .agents/project.local.json`が成功することを確認し、無視されない場合は停止する。
 2. `project`が未設定なら、前項で固定・検証したホストに対するProject検索でRepositoryにリンク済みの候補を探す。取得したProject URLのホストも指定ホストと完全一致することを確認する。GitHub EnterpriseではAPI/CLIの検索結果、Project URL、Repository originのいずれかが別ホストを指す場合、GitHub.comへ誤接続する可能性があるため停止し、読み書きを行わない。同名の未リンクProjectは、同じ可視性で空の場合のみ再利用する。候補の重複・閉鎖・Issue無効・owner/Repository不一致・取得不完全なら停止する。
 3. 対象と変更計画を提示して承認を待ち、その後にだけProject作成・リンク・Status設定を行う。Public作成と、項目があるProjectのStatus option変更には、通常承認とは別に、対象option・既存項目への影響を示した明示承認を得る。Statusの正とする選択肢は[Project管理](../../docs/aide/03-project.md#status)の5つ（`Backlog`、`Ready`、`In progress`、`In review`、`Done`）。
    - Project作成・Repositoryリンク直後にStatus fieldを読み戻す。fieldがなければ、正規の5 optionsを持つStatus fieldを作成する。作成エラーや競合時は再作成せず、fieldを読み戻して状態を判定する。成功応答だけで完了とせず、作成後も必ず読み戻す。
    - fieldが既にある場合はそのoption一覧（ID・名前・色・説明）を読み取る。GitHub標準option `Todo` は `Backlog`、`In Progress` は `In progress`、`Done` は `Done` へ対応させる。移行先が既に存在する場合や、対応関係が一意でない場合は自動変更せず停止して確認する。`Ready`と`In review`など不足する正規optionは追加する。既存optionのID・色・説明と未知optionは保持し、未知optionを削除・改名しない。
    - 既存fieldのoption更新では、対象ホスト上のGitHub Project fieldを編集できるCLIまたはAPIを使う。利用する手段がoptionを安全に更新できることを確認できない場合は推測で実行せず停止する。現在の全optionを読み戻し、既存optionのID・色・説明を保持した上で、承認済みの改名・追加だけを反映する。option IDを省略したり、未取得のoptionを更新対象から落としたりしない。実行エラー、結果不明、読み戻し不一致があれば再実行・続行せず停止する。
    - 対象Projectに項目（アーカイブ済みを含む）がある場合、optionの追加・改名はいずれも個別の明示承認がない限り実行しない。承認が得られない場合はProject作成・リンク等の承認済み作業までに留め、Status未設定／未整合として報告する。
-4. 同じ対象ホストからRepositoryリンク・Project URLのホスト・可視性・Status fieldと全option（ID・名前）・項目数（アーカイブ済みを含む）を読み戻して照合する。5つの正規optionが全て存在し、承認なく未知optionを変更していないことを確認する。optionの不足、予期しない変更、読み戻し不能があれば成功扱いにせず、`.agents/project.json`を更新しない。照合後にのみ`.agents/project.json`を更新・読み戻し検証する。`repository`が未設定の場合は検証済みのoriginで初期化し、既存の不一致は停止する。失敗・判断不能時は書き込みを続けない。
+4. 同じ対象ホストからRepositoryリンク・Project URLのホスト・可視性・Status fieldと全option（ID・名前）・項目数（アーカイブ済みを含む）を読み戻して照合する。5つの正規optionが全て存在し、承認なく未知optionを変更していないことを確認する。optionの不足、予期しない変更、読み戻し不能があれば成功扱いにせず、ローカル設定を書き込まない。照合後にのみ`.agents/project.local.json`を同じディレクトリ内の一時ファイル経由で作成・更新し、mode `0600`、JSON内容、GitHubとの一致を読み戻し検証する。trackedな`.agents/project.json`は一切変更しない。`repository`が未設定の場合は検証済みのoriginでローカル設定を初期化し、既存の不一致は停止する。失敗・判断不能時は書き込みを続けない。
 
-`.agents/project.json`はGit管理対象の共有設定で、変更は作業ツリーに現れる。公開リポジトリでは内容も公開される。Private Projectの識別情報を記載する場合は、対象の公開Repositoryと公開する識別情報を示し、書き込む前に別途明示承認を得る。
+`.agents/project.json`は公開されるGit管理対象のテンプレート設定であり、ライブ値を保存しない。Private Projectの識別情報を含むライブ設定は、Gitで無視されmode `0600`の`.agents/project.local.json`だけに保存する。ローカル設定をIssue、PR、ログ、installer/NPM配布物へ出力しない。ローカル設定がGitで無視されていない、または権限を安全に設定できない場合は書き込みを停止する。
 
 Gitの仕組みとしての総称は[ブランチ戦略](../../docs/aide/01-branches.md)で定義し、設定の更新場所は[Project管理](../../docs/aide/03-project.md)に従う。
 
 ## アウトプット
 
-`.agents/project.json`は次の共有設定を保持する。テンプレートの初期状態では`repository`と`project`を`null`にする。この状態では`project_defaults`は新規Projectの既定値としてのみ使う。title未指定時はRepository名を使い、Project選定後は実際のRepositoryとProject情報（owner、owner_type、number、node_id、title、url、visibility、repository）を設定する。field/option IDや認証情報は含めない。
+`.agents/project.json`は次の中立なテンプレート設定を保持し、trackedのまま`repository`と`project`を`null`にする。`project_defaults`は新規Projectの既定値として使う。実際のRepositoryとProject情報（owner、owner_type、number、node_id、title、url、visibility、repository）は、同じschemaの`.agents/project.local.json`にだけ保存する。ローカル設定にfield/option IDや認証情報を含めない。
 
 ```json
 {
@@ -115,10 +115,10 @@ Gitの仕組みとしての総称は[ブランチ戦略](../../docs/aide/01-bran
 }
 ```
 
-完了時は対象ProjectのURL、確認・変更した内容、キャッシュの検証結果を報告する。停止した場合は理由と未実施の変更を報告する。
+完了時はProject URLをユーザーへの直接応答でのみ報告する。確認・変更内容とローカル設定のignore・権限・整合性確認結果を伝える。Issue・PR・ログにはProject URLやローカル設定値を記録せず、安全な状態・検証の要約だけを残す。設定内容そのものは出力しない。停止した場合は理由と未実施の変更を報告する。
 
 ## 安全境界
 
 - origin・認証先・Projectリンク・可視性・Status・設定の不一致、曖昧な候補、取得不完全、権限不足では推測で選択・変更しない。項目のあるProjectのStatus変更は個別承認がない限り行わず、未知optionは上書きしない。項目数はアーカイブ済みも含めて確認する。
-- 設定ファイルのsymlinkや不正な配置を拒否し、GitHubの状態を検証した後にのみ書き込む。公開される前提で内容を扱い、秘密情報、token、field/option IDは保存しない。
-- forkを含む別Repositoryへテンプレートを再利用するとき、コピーされた設定がsource Repositoryに結び付いていればProjectの探索・選択・変更をせず停止する。ユーザーが承認して中立な初期設定へ戻すまで、sourceの既定値やProjectを使わない。
+- 設定ファイルのsymlinkや不正な配置を拒否し、GitHubの状態を検証した後にのみローカル設定へ書き込む。ローカル設定はGit ignoreを確認し、mode `0600`で保存する。ログ・Issue・PRへ値を表示せず、秘密情報、token、field/option IDは保存しない。
+- forkを含む別Repositoryへテンプレートを再利用するとき、trackedな`.agents/project.json`が中立でない場合は、source Repositoryの設定を使わず停止する。ユーザーの確認なしにテンプレート設定をnullへ書き換えない。ローカル上書きが存在してoriginと不一致の場合もProject操作を行わず停止する。

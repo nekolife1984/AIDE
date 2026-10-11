@@ -45,7 +45,7 @@ AIエージェントにGitHub Projectの初期化を依頼し、提示された�
 
 ## 既存リポジトリへ導入する
 
-AIDEをGitHubテンプレートとして新規作成せず、既存リポジトリにAIDEの共通運用資料を追加する場合は、`npx`から実行できます。コピー対象は [`scripts/aide_install_manifest.json`](scripts/aide_install_manifest.json) に限定され、`.agents/project.json`、`AGENTS.md`本体、認証情報、ローカルキャッシュは含まれません。`AGENTS.md`用の案内はテンプレートとして配布されます。
+AIDEをGitHubテンプレートとして新規作成せず、既存リポジトリにAIDEの共通運用資料を追加する場合は、`npx`から実行できます。コピー対象は [`scripts/aide_install_manifest.json`](scripts/aide_install_manifest.json) に限定され、`.agents/project.json`、`.agents/project.local.json`、`AGENTS.md`本体、認証情報、ローカルキャッシュは含まれません。`AGENTS.md`用の案内はテンプレートとして配布されます。`.agents/project.local.json`はclone固有の設定としてGitで無視してください。
 
 Node.js 18以降とPython 3.9以降が必要です。まずdry-runで追加・同一・競合を確認します。dry-runはファイルを変更しません。インストーラーは導入先の `AGENTS.md` を作成・変更しません。
 

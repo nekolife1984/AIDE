@@ -40,4 +40,4 @@ git worktree remove /absolute/path/to/AIDE-<issue>
 git worktree list
 ```
 
-リンク作業ツリーでは`.agents/project.json`を更新せず、`project.json`が未設定（`project`が`null`）の場合も`aide-init`を実行しない。必要な初期化は、リンク作業ツリーを作成する前に主作業ツリーで完了する。
+リンク作業ツリーでは`.agents/project.json`と`.agents/project.local.json`を更新せず、ローカル設定がない場合も`aide-init`を実行しない。必要な初期化・更新は、リンク作業ツリーを作成する前に主作業ツリーで完了する。
