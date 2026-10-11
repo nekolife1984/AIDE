@@ -11,7 +11,7 @@ Issueは目的と完了条件、PRは変更と検証結果、Projectは進捗の
 - 登録後、IssueとStatusを読み戻して確認。
 - 原則1リポジトリにつきProjectは1つ。
 
-## 作業ツリー間の設定管理
+## project.jsonの設定管理
 
 `.agents/project.json`はGit管理対象の共有設定であり、主作業ツリーでのみ更新する。リンク作業ツリーでは読み取り専用として扱い、`project.json`が未設定（`project`が`null`）の間は`aide-init`を実行しない。
 
