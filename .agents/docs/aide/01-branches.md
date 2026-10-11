@@ -32,7 +32,7 @@ git fetch origin main
 git worktree add /absolute/path/to/AIDE-<issue> -b <branch-name> origin/main
 ```
 
-作業はリンク作業ツリー内で行い、完了後は未コミット変更がないことを確認してから、主作業ツリーで削除する。
+リンク作業ツリーで作業し、完了後は未コミット変更がないことを確認してから、主作業ツリーで削除する。
 
 ```bash
 git -C /absolute/path/to/AIDE-<issue> status --short
