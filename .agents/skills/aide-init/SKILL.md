@@ -38,6 +38,37 @@ Pythonを使えない環境でも、AIエージェントがGitHub CLIで対象Re
 
 ## 実行
 
+副作用を伴う工程へ進む前に、実行位置を含む全前提条件を最初の副作用より前に判定する。判定不能やコマンド失敗は成功扱いせず、後続のGitHub操作・設定書き込みを行わない。
+
+### 主作業ツリーのプリフライト
+
+Repository rootで、GitHub CLIの認証確認・Project検索・作成・リンク・Status変更・`.agents/project.json`書き込みより前に、次の確認を行う。`aide-init`は主作業ツリーからのみ実行し、リンク作業ツリーでは実行しない。
+
+```sh
+if ! is_bare=$(git rev-parse --is-bare-repository 2>/dev/null); then
+  printf '%s\n' 'Error: unable to verify a non-bare Git repository.' >&2
+  exit 1
+fi
+if [ "$is_bare" != "false" ]; then
+  printf '%s\n' 'Error: aide-init requires a non-bare primary working tree.' >&2
+  exit 1
+fi
+if ! git_dir=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null); then
+  printf '%s\n' 'Error: unable to resolve the Git directory.' >&2
+  exit 1
+fi
+if ! git_common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+  printf '%s\n' 'Error: unable to resolve the common Git directory.' >&2
+  exit 1
+fi
+if [ -z "$git_dir" ] || [ -z "$git_common_dir" ] || [ "$git_dir" != "$git_common_dir" ]; then
+  printf '%s\n' 'Error: aide-init must run from the primary working tree.' >&2
+  exit 1
+fi
+```
+
+この判定が成功した場合だけ、既存のstep 1へ進む。リンク作業ツリー、bare repository、Git未導入、リポジトリ外、想定外出力、その他の失敗では停止し、リモート・ローカルの副作用を起こさない。
+
 Repository rootで、GitHub CLI (`gh`) の認証とProject操作権限を確認する。GitHub.comではホストを`github.com`とする。GitHub Enterpriseでは組織のWebホスト名（ホスト名のみ。scheme・path・末尾のslashなし）を先に確定し、全ての`gh`コマンドで同じホストを使う。推奨はコマンド実行環境に`GH_HOST=<enterprise-host>`を設定する方法。設定がコマンド環境に継承されない場合は、各コマンドが対応していると確認できた場合に限り`--hostname <enterprise-host>`を使う。Enterpriseのコマンドで`github.com`を指定・フォールバックしてはならない。
 
 Enterpriseでの認証例（`GH_HOST`は以降の全`gh`コマンドに継承させる）：
@@ -68,6 +99,8 @@ gh auth refresh --hostname github.com --scopes project
 4. 同じ対象ホストからRepositoryリンク・Project URLのホスト・可視性・Status fieldと全option（ID・名前）・項目数（アーカイブ済みを含む）を読み戻して照合する。5つの正規optionが全て存在し、承認なく未知optionを変更していないことを確認する。optionの不足、予期しない変更、読み戻し不能があれば成功扱いにせず、`.agents/project.json`を更新しない。照合後にのみ`.agents/project.json`を更新・読み戻し検証する。`repository`が未設定の場合は検証済みのoriginで初期化し、既存の不一致は停止する。失敗・判断不能時は書き込みを続けない。
 
 `.agents/project.json`はGit管理対象の共有設定で、変更は作業ツリーに現れる。公開リポジトリでは内容も公開される。Private Projectの識別情報を記載する場合は、対象の公開Repositoryと公開する識別情報を示し、書き込む前に別途明示承認を得る。
+
+Gitの仕組みとしての総称は[ブランチ戦略](../../docs/aide/01-branches.md)で定義し、設定の更新場所は[Project管理](../../docs/aide/03-project.md)に従う。
 
 ## アウトプット
 
