@@ -2,3 +2,6 @@
 .env
 .env.*
 !.env.example
+
+# cloneごとのGitHub Project設定
+/.agents/project.local.json

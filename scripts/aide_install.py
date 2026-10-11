@@ -14,7 +14,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = REPO_ROOT / "scripts" / "aide_install_manifest.json"
 SPECIAL_FILES = {
-    ".gitignore": "既存内容を保持します。必要に応じて次を既存ルールへ統合してください:\n\n# ローカル環境設定（例示ファイルは追跡可能）\n.env\n.env.*\n!.env.example\n",
+    ".gitignore": "既存内容を保持します。必要に応じて次を既存ルールへ統合してください:\n\n# ローカル環境設定（例示ファイルは追跡可能）\n.env\n.env.*\n!.env.example\n\n# cloneごとのGitHub Project設定\n/.agents/project.local.json\n",
 }
 SOURCE_FALLBACKS = {
     ".gitignore": Path("scripts") / "templates" / "gitignore",

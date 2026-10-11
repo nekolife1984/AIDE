@@ -11,11 +11,13 @@ Issueは目的と完了条件、PRは変更と検証結果、Projectは進捗の
 - 登録後、IssueとStatusを読み戻して確認。
 - 原則1リポジトリにつきProjectは1つ。
 
-## project.jsonの設定管理
+## Project設定の管理
 
-`.agents/project.json`はGit管理対象の共有設定であり、主作業ツリーでのみ更新する。リンク作業ツリーでは読み取り専用として扱い、`project.json`が未設定（`project`が`null`）の間は`aide-init`を実行しない。
+`.agents/project.json`はGit管理対象のテンプレート設定で、`repository`と`project`は`null`に保つ。clone固有のライブ設定はgitignore対象の`.agents/project.local.json`に保存し、ローカルファイルはGit・Issue・PR・installerへ含めない。
 
-リンク作業ツリーを作成する前に、主作業ツリーで必要な`aide-init`を完了し、設定対象のRepositoryとProjectを確認する。リンク作業ツリーで設定を変更すると主作業ツリーと内容が分岐するため、更新が必要な場合は主作業ツリーで変更し、通常のブランチとPRの手順で共有する。
+有効な設定は`.agents/project.local.json`があればそれを使い、なければ`.agents/project.json`のテンプレート設定を初期化の基準にする。ローカル設定が存在するのに不完全・不正・originと不一致の場合は、テンプレートへ黙ってフォールバックせず停止する。`aide-init`は確認済みのライブ設定をローカル上書きへ保存し、trackedなテンプレート設定を変更しない。
+
+`aide-init`と両設定ファイルの更新は主作業ツリーでのみ行う。リンク作業ツリーでは`.agents/project.json`と`.agents/project.local.json`を更新せず、ローカル設定がない場合も`aide-init`を実行しない。必要な初期化・更新はリンク作業ツリーを作成する前に主作業ツリーで完了する。
 
 ## Status
 
