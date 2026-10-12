@@ -198,6 +198,18 @@ def main(argv: list[str] | None = None) -> int:
             raise InstallError(f"導入先がディレクトリではありません: {target}")
         files = load_manifest()
         statuses, conflicts = classify(target, files)
+        migrations = [
+            (old, new)
+            for old, new in LEGACY_DOCS.items()
+            if statuses.get(new, "").startswith("移動（")
+        ]
+        migration_sources = {old for old, _ in migrations}
+        legacy_cleanup = [
+            old
+            for old, new in LEGACY_DOCS.items()
+            if old not in migration_sources and safe_destination(target, old).is_file()
+            and safe_destination(target, new).is_file()
+        ]
     except (OSError, InstallError) as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         return 2
@@ -213,6 +225,12 @@ def main(argv: list[str] | None = None) -> int:
             target_text = (target / relative).read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
             print("".join(difflib.unified_diff(target_text, source_text, fromfile="既存", tofile="AIDE提案")))
 
+    for relative in legacy_cleanup:
+        if conflicts:
+            print(f"[削除候補（競合のため未適用）] {relative}")
+        else:
+            print(f"[旧配置の削除対象] {relative}")
+
     if conflicts:
         print("競合があるため、部分適用を避けて全ての書き込みを停止しました:")
         for relative in conflicts:
@@ -224,18 +242,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     additions = [path for path, status in statuses.items() if status == "追加"]
-    migrations = [
-        (old, new)
-        for old, new in LEGACY_DOCS.items()
-        if statuses.get(new, "").startswith("移動（")
-    ]
-    migration_sources = {old for old, _ in migrations}
-    legacy_cleanup = [
-        old
-        for old, new in LEGACY_DOCS.items()
-        if old not in migration_sources and safe_destination(target, old).is_file()
-        and safe_destination(target, new).is_file()
-    ]
     try:
         install(target, additions, migrations, legacy_cleanup)
     except InstallError as exc:

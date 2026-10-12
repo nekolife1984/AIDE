@@ -98,6 +98,43 @@ class AideInstallTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(any((self.target / old).exists() for old in aide_install.LEGACY_DOCS))
 
+    def test_dry_run_reports_legacy_cleanup_and_apply_removes_it(self):
+        old_relative = ".agents/docs/01-branches.md"
+        new_relative = ".agents/docs/aide/01-branches.md"
+        old = self.target / old_relative
+        new = self.target / new_relative
+        old.parent.mkdir(parents=True)
+        new.parent.mkdir(parents=True)
+        old.write_text("customized legacy content\n", encoding="utf-8")
+        new.write_bytes((aide_install.REPO_ROOT / new_relative).read_bytes())
+
+        code, output = self.run_cli("--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn(f"[旧配置の削除対象] {old_relative}", output)
+        self.assertEqual(old.read_text(encoding="utf-8"), "customized legacy content\n")
+
+        code, output = self.run_cli("--apply")
+        self.assertEqual(code, 0)
+        self.assertIn(f"[旧配置の削除対象] {old_relative}", output)
+        self.assertFalse(old.exists())
+
+    def test_conflict_marks_legacy_cleanup_as_not_applied(self):
+        old_relative = ".agents/docs/01-branches.md"
+        new_relative = ".agents/docs/aide/01-branches.md"
+        old = self.target / old_relative
+        new = self.target / new_relative
+        old.parent.mkdir(parents=True)
+        new.parent.mkdir(parents=True)
+        old.write_text("legacy content\n", encoding="utf-8")
+        new.write_text("custom canonical content\n", encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 1)
+        self.assertIn(f"[削除候補（競合のため未適用）] {old_relative}", output)
+        self.assertEqual(old.read_text(encoding="utf-8"), "legacy content\n")
+        self.assertEqual(new.read_text(encoding="utf-8"), "custom canonical content\n")
+
     def test_conflict_prevents_all_writes_and_shows_integration_proposals(self):
         (self.target / "AGENTS.md").write_text("custom agents\n", encoding="utf-8")
         (self.target / ".gitignore").write_text("custom ignore\n", encoding="utf-8")
