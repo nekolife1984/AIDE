@@ -170,12 +170,20 @@ class MarkdownLinkValidationTests(unittest.TestCase):
 
         self.assertEqual(anchors, {"foo", "foo-1", "foo-1-1"})
 
-    def test_removes_punctuation_from_heading_anchor(self):
+    def test_heading_anchor_preserves_underscore_and_rejects_removed_underscore(self):
         (self.root / "guide.md").write_text("# Foo_Bar!\n", encoding="utf-8")
 
-        errors = validate_text(self.root, self.source, "[guide](guide.md#foobar)\n")
+        valid = validate_text(self.root, self.source, "[guide](guide.md#foo_bar)\n")
+        invalid = validate_text(self.root, self.source, "[guide](guide.md#foobar)\n")
 
-        self.assertEqual(errors, [])
+        self.assertEqual(valid, [])
+        self.assertEqual(len(invalid), 1)
+        self.assertIn("#foobar", invalid[0])
+
+    def test_heading_slug_preserves_consecutive_underscores_and_suffix_collisions(self):
+        anchors = heading_slugs("# Foo__Bar\n# Foo__Bar\n# Foo__Bar 1\n")
+
+        self.assertEqual(anchors, {"foo__bar", "foo__bar-1", "foo__bar-1-1"})
 
     def test_decodes_html_character_references_in_destinations(self):
         (self.root / "foo&bar.md").write_text("# Home\n", encoding="utf-8")

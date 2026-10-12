@@ -60,7 +60,7 @@ def _heading_slug(text: str) -> str:
     characters = []
     for character in text.lower():
         category = unicodedata.category(character)
-        if character in " -" or category[0] in "LNM":
+        if character in " -_" or category[0] in "LNM":
             characters.append(character)
     return "".join(characters).replace(" ", "-")
 
