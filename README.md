@@ -66,7 +66,7 @@ python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --dry
 python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --apply
 ```
 
-通常のコピー対象に競合が1件でもあれば、全件を表示して書き込みを停止します。競合ファイルを手動で退避または統合してから再実行してください。`AGENTS.md`は配布されたテンプレートを使い、`aide-init`が変更案を提示して確認・承認を得てから作成または既存内容へ追記します。インストール時に `AGENTS.md` や `.gitignore` は変更せず、`.gitignore` の統合案だけを表示します。同一ファイルはそのまま保持され、再実行できます。
+通常のコピー対象に競合が1件でもあれば、全件を表示して書き込みを停止します。競合ファイルを手動で退避または統合してから再実行してください。`AGENTS.md`は配布されたテンプレートを使い、`aide-init`が変更案を提示して確認・承認を得てから作成または既存内容へ追記します。インストール時に `AGENTS.md` は作成・変更しません。既存の `.gitignore` は変更せず、配布内容と異なる場合は統合案を表示します。`.gitignore` がない場合は、dry-runで `[追加] .gitignore` と表示し、`--apply` でマニフェストで指定された配布内容から作成します。同一ファイルはそのまま保持され、再実行できます。
 
 ## 詳細
 
