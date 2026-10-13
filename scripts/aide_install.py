@@ -1185,22 +1185,54 @@ def install(
         for relative in legacy_cleanup:
             safe_destination(root, relative).unlink(missing_ok=True)
     except (OSError, InstallError) as exc:
+        rollback_failures: list[str] = []
+        restore_targets: list[Path] = []
         for source, destination, original in reversed(moved):
             try:
                 destination.write_bytes(original)
                 os.replace(destination, source)
-            except OSError:
-                pass
+            except OSError as rollback_exc:
+                restore_targets.append(source)
+                rollback_failures.append(
+                    f"restore document: {source.relative_to(root).as_posix()} <- "
+                    f"{destination.relative_to(root).as_posix()}; errno={rollback_exc.errno}"
+                )
         for path in reversed(created):
             try:
                 path.unlink()
-            except OSError:
-                pass
+            except OSError as rollback_exc:
+                rollback_failures.append(
+                    f"remove file: {path.relative_to(root).as_posix()}; errno={rollback_exc.errno}"
+                )
         for path in reversed(created_dirs):
             try:
                 path.rmdir()
-            except OSError:
-                pass
+            except OSError as rollback_exc:
+                rollback_failures.append(
+                    f"remove directory: {path.relative_to(root).as_posix()}; errno={rollback_exc.errno}"
+                )
+        if rollback_failures:
+            remaining_paths: list[str] = []
+            candidates = {*created, *created_dirs, *(destination for _, destination, _ in moved)}
+            for path in sorted(candidates):
+                relative = path.relative_to(root).as_posix()
+                try:
+                    path.lstat()
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    relative += " (state unavailable)"
+                remaining_paths.append(relative)
+            details = "\n".join(f"  - {failure}" for failure in rollback_failures)
+            remaining = "\n".join(f"  - {path}" for path in remaining_paths) or "  - none"
+            restore = "\n".join(
+                f"  - {path.relative_to(root).as_posix()}" for path in restore_targets
+            ) or "  - none"
+            raise InstallError(
+                f"Installation failed: {exc}\nRollback incomplete; manual recovery required.\n"
+                f"Rollback failures:\n{details}\nRemaining paths:\n{remaining}\n"
+                f"Restore targets requiring confirmation:\n{restore}"
+            ) from exc
         raise InstallError(f"コピーに失敗しました。作成済みファイルをロールバックしました: {exc}") from exc
 
 
