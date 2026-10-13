@@ -1,4 +1,5 @@
 import contextlib
+import errno
 import hashlib
 import io
 import json
@@ -2027,6 +2028,227 @@ class AideInstallTests(unittest.TestCase):
         headings, candidates = _extract_legacy_migration_candidates(moved)
         self.assertEqual(expected_headings, headings)
         self.assertNotEqual(expected_candidates, normalize_candidates(candidates))
+
+    def test_rollback_unlink_failure_reports_incomplete_recovery_and_remaining_path(self):
+        real_open = aide_install.os.open
+        real_unlink = Path.unlink
+        calls = 0
+        remaining = self.target.resolve() / ".agents/docs/aide/00_index.md"
+
+        def fail_on_second_open(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError(errno.ENOSPC, "simulated initial write failure")
+            return real_open(*args, **kwargs)
+
+        def deny_remaining_unlink(path, *args, **kwargs):
+            if path == remaining:
+                raise PermissionError(errno.EACCES, "sensitive rollback detail", str(path))
+            return real_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(aide_install.os, "open", side_effect=fail_on_second_open), mock.patch.object(
+            Path, "unlink", autospec=True, side_effect=deny_remaining_unlink
+        ):
+            code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 2)
+        self.assertTrue(remaining.is_file())
+        self.assertEqual(remaining.read_bytes(), aide_install.source_path(".agents/docs/aide/00_index.md").read_bytes())
+        self.assertIn("simulated initial write failure", output)
+        self.assertIn("Rollback incomplete", output)
+        self.assertIn("manual recovery required", output)
+        self.assertIn("remove file: .agents/docs/aide/00_index.md", output)
+        self.assertIn(f"errno={errno.EACCES}", output)
+        self.assertIn("Remaining paths:", output)
+        self.assertNotIn("sensitive rollback detail", output)
+        self.assertNotIn("ロールバックしました", output)
+        self.assertNotIn("導入完了:", output)
+
+    def test_rollback_directory_failure_reports_empty_remaining_directory(self):
+        real_open = aide_install.os.open
+        real_rmdir = Path.rmdir
+        remaining = self.target.resolve() / ".agents/docs/aide"
+        calls = 0
+
+        def fail_on_second_open(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError(errno.ENOSPC, "simulated initial write failure")
+            return real_open(*args, **kwargs)
+
+        def deny_directory_rmdir(path, *args, **kwargs):
+            if path == remaining:
+                raise PermissionError(errno.EACCES, "sensitive directory detail", str(path))
+            return real_rmdir(path, *args, **kwargs)
+
+        with mock.patch.object(aide_install.os, "open", side_effect=fail_on_second_open), mock.patch.object(
+            Path, "rmdir", autospec=True, side_effect=deny_directory_rmdir
+        ):
+            code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 2)
+        self.assertTrue(remaining.is_dir())
+        self.assertEqual(list(remaining.iterdir()), [])
+        self.assertIn("Rollback incomplete", output)
+        self.assertIn("remove directory: .agents/docs/aide", output)
+        self.assertIn("Remaining paths:\n  - .agents\n  - .agents/docs\n  - .agents/docs/aide", output)
+        self.assertIn("simulated initial write failure", output)
+        self.assertNotIn("sensitive directory detail", output)
+        self.assertNotIn("ロールバックしました", output)
+
+    def test_rollback_continues_removing_other_files_after_unlink_failure(self):
+        real_open = aide_install.os.open
+        real_unlink = Path.unlink
+        first = self.target.resolve() / ".agents/docs/aide/00_index.md"
+        remaining = self.target.resolve() / ".agents/docs/aide/01-branches.md"
+        calls = 0
+
+        def fail_on_third_open(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                raise OSError(errno.ENOSPC, "simulated third write failure")
+            return real_open(*args, **kwargs)
+
+        def deny_second_file_unlink(path, *args, **kwargs):
+            if path == remaining:
+                raise PermissionError(errno.EACCES, "sensitive rollback detail", str(path))
+            return real_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(aide_install.os, "open", side_effect=fail_on_third_open), mock.patch.object(
+            Path, "unlink", autospec=True, side_effect=deny_second_file_unlink
+        ):
+            code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 2)
+        self.assertFalse(first.exists())
+        self.assertTrue(remaining.is_file())
+        self.assertIn("Rollback incomplete", output)
+        self.assertIn("remove file: .agents/docs/aide/01-branches.md", output)
+        remaining_report = output.split("Remaining paths:\n", 1)[1].split("Restore targets", 1)[0]
+        self.assertIn(".agents/docs/aide/01-branches.md", remaining_report)
+        self.assertNotIn(".agents/docs/aide/00_index.md", remaining_report)
+        self.assertIn("remove directory:", output)
+        self.assertNotIn("sensitive rollback detail", output)
+
+    def test_migration_rollback_reports_restore_write_and_rename_failures(self):
+        real_replace = aide_install.os.replace
+        real_write_bytes = Path.write_bytes
+        for failure_kind in ("write", "rename"):
+            with self.subTest(failure_kind=failure_kind), tempfile.TemporaryDirectory(dir=self.target) as temp:
+                root = Path(temp).resolve()
+                first = root / ".agents/docs/01-branches.md"
+                second = root / ".agents/docs/02-issues.md"
+                destination = root / ".agents/docs/aide/01-branches.md"
+                first.parent.mkdir(parents=True)
+                original = b"[Guide](../../guide.md)\n"
+                first.write_bytes(original)
+                second.write_bytes(b"# Second document\n")
+                (root / "guide.md").write_bytes(b"# Guide\n")
+
+                def fail_replace(source, target):
+                    if Path(source) == second:
+                        raise OSError(errno.ENOSPC, "simulated migration failure")
+                    if failure_kind == "rename" and Path(source) == destination and Path(target) == first:
+                        raise PermissionError(errno.EACCES, "sensitive rename detail", str(target))
+                    return real_replace(source, target)
+
+                def fail_restore_write(path, data):
+                    if failure_kind == "write" and path == destination and data == original:
+                        raise PermissionError(errno.EACCES, "sensitive restore detail", str(path))
+                    return real_write_bytes(path, data)
+
+                output = io.StringIO()
+                with mock.patch.object(aide_install.os, "replace", side_effect=fail_replace), mock.patch.object(
+                    Path, "write_bytes", autospec=True, side_effect=fail_restore_write
+                ), contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                    code = aide_install.main([str(root), "--apply"])
+                text = output.getvalue()
+
+                self.assertEqual(code, 2)
+                self.assertFalse(first.exists())
+                self.assertTrue(destination.is_file())
+                expected = original if failure_kind == "rename" else b"[Guide](../../../guide.md)\n"
+                self.assertEqual(destination.read_bytes(), expected)
+                self.assertEqual(second.read_bytes(), b"# Second document\n")
+                self.assertFalse((root / ".agents/docs/aide/00_index.md").exists())
+                self.assertIn("simulated migration failure", text)
+                self.assertIn("Rollback incomplete", text)
+                self.assertIn("restore document: .agents/docs/01-branches.md <- .agents/docs/aide/01-branches.md", text)
+                self.assertIn("Restore targets requiring confirmation:\n  - .agents/docs/01-branches.md", text)
+                self.assertIn("Remaining paths:\n  - .agents/docs/aide\n  - .agents/docs/aide/01-branches.md", text)
+                self.assertNotIn("sensitive", text)
+                self.assertNotIn("ロールバックしました", text)
+
+    def test_migration_failure_restores_original_bytes_when_rollback_succeeds(self):
+        root = self.target.resolve()
+        first = root / ".agents/docs/01-branches.md"
+        second = root / ".agents/docs/02-issues.md"
+        first.parent.mkdir(parents=True)
+        first.write_bytes(b"[Guide](../../guide.md)\n")
+        second.write_bytes(b"# Second document\n")
+        (root / "guide.md").write_bytes(b"# Guide\n")
+        before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+        before_dirs = {p.relative_to(root) for p in root.rglob("*") if p.is_dir()}
+        real_replace = aide_install.os.replace
+
+        def fail_second_migration(source, target):
+            if Path(source) == second:
+                raise OSError(errno.ENOSPC, "simulated migration failure")
+            return real_replace(source, target)
+
+        with mock.patch.object(aide_install.os, "replace", side_effect=fail_second_migration):
+            code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 2)
+        after = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+        after_dirs = {p.relative_to(root) for p in root.rglob("*") if p.is_dir()}
+        self.assertEqual(before, after)
+        self.assertEqual(before_dirs, after_dirs)
+        self.assertIn("simulated migration failure", output)
+        self.assertIn("ロールバックしました", output)
+        self.assertNotIn("Rollback incomplete", output)
+
+    def test_rollback_path_inspection_failure_preserves_original_error(self):
+        real_open = aide_install.os.open
+        real_unlink = Path.unlink
+        real_lstat = Path.lstat
+        remaining = self.target.resolve() / ".agents/docs/aide/00_index.md"
+        calls = 0
+        rollback_started = False
+
+        def fail_on_second_open(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError(errno.ENOSPC, "simulated initial write failure")
+            return real_open(*args, **kwargs)
+
+        def deny_unlink(path, *args, **kwargs):
+            nonlocal rollback_started
+            if path == remaining:
+                rollback_started = True
+                raise PermissionError(errno.EACCES, "sensitive rollback detail", str(path))
+            return real_unlink(path, *args, **kwargs)
+
+        def deny_lstat(path, *args, **kwargs):
+            if rollback_started and path == remaining:
+                raise PermissionError(errno.EACCES, "sensitive inspection detail", str(path))
+            return real_lstat(path, *args, **kwargs)
+
+        with mock.patch.object(aide_install.os, "open", side_effect=fail_on_second_open), mock.patch.object(
+            Path, "unlink", autospec=True, side_effect=deny_unlink
+        ), mock.patch.object(Path, "lstat", autospec=True, side_effect=deny_lstat):
+            code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 2)
+        self.assertTrue(remaining.is_file())
+        self.assertIn("simulated initial write failure", output)
+        self.assertIn("Rollback incomplete", output)
+        self.assertIn(".agents/docs/aide/00_index.md (state unavailable)", output)
+        self.assertNotIn("sensitive", output)
 
     def test_copy_failure_rolls_back_created_files_and_directories(self):
         real_open = aide_install.os.open
