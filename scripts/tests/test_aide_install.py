@@ -14,6 +14,61 @@ from unittest import mock
 import scripts.aide_install as aide_install
 
 
+def _normalize_one_terminal_newline(value: bytes) -> bytes:
+    if value.endswith(b"\r\n"):
+        return value[:-2]
+    if value.endswith(b"\n"):
+        return value[:-1]
+    return value
+
+
+def _extract_legacy_migration_candidates(
+    skill: bytes,
+) -> tuple[list[bytes], list[tuple[bytes | None, bytes, bytes, bytes]]]:
+    start = skill.index("旧版がルート".encode("utf-8"))
+    end = skill.index("案内削除を依頼された場合".encode("utf-8"), start)
+    lines = skill[start:end].splitlines(keepends=True)
+    headings = []
+    code_blocks = []
+    opening_fence = None
+    current_heading = None
+    language = b""
+    body_lines = []
+
+    for line in lines:
+        line_content = line.removesuffix(b"\n").removesuffix(b"\r")
+        unindented = line_content.lstrip(b" ")
+        indent = len(line_content) - len(unindented)
+        if opening_fence is None:
+            heading_separator = unindented[4:5] if unindented.startswith(b"####") else b""
+            if indent <= 3 and heading_separator in (b" ", b"\t"):
+                current_heading = unindented[4:].lstrip(b" \t")
+                headings.append(current_heading)
+            if indent <= 3 and unindented.startswith((b"```", b"~~~")):
+                marker_char = unindented[:1]
+                marker_length = len(unindented) - len(unindented.lstrip(marker_char))
+                if marker_length >= 3:
+                    opening_fence = unindented[:marker_length]
+                    language = unindented[marker_length:].strip()
+                    body_lines = []
+        elif (
+            indent <= 3
+            and unindented.startswith(opening_fence)
+            and not unindented[len(opening_fence) :].strip()
+        ):
+            code_blocks.append(
+                (current_heading, opening_fence, language, b"".join(body_lines))
+            )
+            opening_fence = None
+            current_heading = None
+        else:
+            body_lines.append(line)
+
+    if opening_fence is not None:
+        raise ValueError("migration section has an unclosed code fence")
+    return headings, code_blocks
+
+
 class AideInstallTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -320,9 +375,137 @@ class AideInstallTests(unittest.TestCase):
         self.assertIn("管理タグは `AGENTS.md` に出力しない", skill)
         self.assertIn("見出し階層", skill)
         self.assertIn("以前のコメントタグ", skill)
-        self.assertIn("旧案内本文と末尾の改行だけを正規化して完全一致", skill)
-        self.assertIn("部分一致、追記・編集済み", skill)
+        self.assertIn("完全な文書", skill)
+        self.assertIn("ファイル末尾にある改行コード1つ", skill)
         self.assertIn("既存の案内外の記載が保たれている", skill)
+
+    def test_aide_init_recognizes_only_exact_frozen_legacy_agents_documents(self):
+        skill = (aide_install.REPO_ROOT / ".agents/skills/aide-init/SKILL.md").read_bytes()
+        versions = (
+            ("旧配布版（#41、0757dbe）", "legacy_agents_0757dbe.md"),
+            ("旧配布版（#61、127874c）", "legacy_agents_127874c.md"),
+            ("後続配布版（PR #66後、fa60a6a）", "legacy_agents_current.md"),
+        )
+
+        candidate_headings, code_blocks = _extract_legacy_migration_candidates(skill)
+        self.assertEqual(
+            [heading.encode("utf-8") for heading, _ in versions], candidate_headings
+        )
+        self.assertEqual(
+            len(versions), len(code_blocks), "all migration-section fences must be candidates"
+        )
+        self.assertEqual(
+            [b"```"] * len(versions), [fence for _, fence, _, _ in code_blocks]
+        )
+        self.assertEqual(
+            [b"markdown"] * len(versions), [language for _, _, language, _ in code_blocks]
+        )
+
+        known_candidates: set[bytes] = set()
+        for (heading, filename), (documented_heading, _, _, documented) in zip(
+            versions, code_blocks
+        ):
+            with self.subTest(version=heading):
+                self.assertEqual(heading.encode("utf-8"), documented_heading)
+                fixture = (Path(__file__).parent / "fixtures" / filename).read_bytes()
+                normalized_documented = _normalize_one_terminal_newline(documented)
+                normalized_fixture = _normalize_one_terminal_newline(fixture)
+                self.assertEqual(normalized_documented, normalized_fixture)
+                known_candidates.add(normalized_fixture)
+                for ending in (b"", b"\n", b"\r\n"):
+                    self.assertIn(_normalize_one_terminal_newline(normalized_fixture + ending), known_candidates)
+
+        self.assertEqual(len(versions), len(known_candidates), "legacy candidates must be distinct")
+
+        for filename in (
+            "legacy_agents_0757dbe.md",
+            "legacy_agents_127874c.md",
+            "legacy_agents_current.md",
+        ):
+            fixture = (Path(__file__).parent / "fixtures" / filename).read_bytes()
+            mutations = (
+                fixture.replace("開発ルール".encode("utf-8"), "開発規則".encode("utf-8"), 1),
+                fixture + "\n利用者の追記\n".encode("utf-8"),
+                _normalize_one_terminal_newline(fixture) + b"\n\n",
+                fixture.replace(b"## GitHub Project", b"### GitHub Project", 1),
+                _normalize_one_terminal_newline(fixture) + b"\r",
+                fixture.replace(b"\n", b"\r\n", 1),
+            )
+            for mutated in mutations:
+                with self.subTest(fixture=filename, mutation=mutated[:32]):
+                    self.assertNotIn(_normalize_one_terminal_newline(mutated), known_candidates)
+
+    def test_aide_init_candidate_census_detects_every_migration_fence(self):
+        skill = (aide_install.REPO_ROOT / ".agents/skills/aide-init/SKILL.md").read_bytes()
+        versions = (
+            ("旧配布版（#41、0757dbe）", "legacy_agents_0757dbe.md"),
+            ("旧配布版（#61、127874c）", "legacy_agents_127874c.md"),
+            ("後続配布版（PR #66後、fa60a6a）", "legacy_agents_current.md"),
+        )
+        expected_headings = [heading.encode("utf-8") for heading, _ in versions]
+        expected_candidates = []
+        for heading, filename in versions:
+            fixture = (Path(__file__).parent / "fixtures" / filename).read_bytes()
+            expected_candidates.append(
+                (
+                    heading.encode("utf-8"),
+                    b"```",
+                    b"markdown",
+                    _normalize_one_terminal_newline(fixture),
+                )
+            )
+        def normalize_candidates(candidates):
+            return [
+                (heading, fence, language, _normalize_one_terminal_newline(body))
+                for heading, fence, language, body in candidates
+            ]
+
+        newline = bytes((10,))
+        actual_headings, actual_candidates = _extract_legacy_migration_candidates(skill)
+        actual_candidates = normalize_candidates(actual_candidates)
+        self.assertEqual(expected_headings, actual_headings)
+        self.assertEqual(expected_candidates, actual_candidates)
+
+        anchor = "案内削除を依頼された場合".encode("utf-8")
+        extra_blocks = (
+            b"```text" + newline + b"extra candidate" + newline + b"```" + newline,
+            b"```" + newline + b"extra candidate" + newline + b"```" + newline,
+            b"~~~markdown" + newline + b"extra candidate" + newline + b"~~~" + newline,
+            b"   ```markdown" + newline + b"extra candidate" + newline + b"   ```" + newline,
+        )
+        for addition in extra_blocks:
+            with self.subTest(extra_fence=addition[:32]):
+                position = skill.index(anchor)
+                mutated = skill[:position] + newline + addition + skill[position:]
+                headings, candidates = _extract_legacy_migration_candidates(mutated)
+                self.assertEqual(expected_headings, headings)
+                self.assertNotEqual(expected_candidates, normalize_candidates(candidates))
+
+        tab_heading = newline + b"####\tUnexpected candidate" + newline
+        position = skill.index(anchor)
+        mutated = skill[:position] + tab_heading + skill[position:]
+        headings, candidates = _extract_legacy_migration_candidates(mutated)
+        self.assertEqual(expected_headings + [b"Unexpected candidate"], headings)
+        self.assertEqual(expected_candidates, normalize_candidates(candidates))
+
+        second_heading = b"#### " + expected_headings[1] + newline * 2
+        moved = skill.replace(second_heading, b"", 1)
+        first_marker = b"#### " + expected_headings[0] + newline * 2 + b"```markdown" + newline
+        moved = moved.replace(
+            first_marker,
+            b"#### "
+            + expected_headings[0]
+            + newline * 2
+            + b"#### "
+            + expected_headings[1]
+            + newline * 2
+            + b"```markdown"
+            + newline,
+            1,
+        )
+        headings, candidates = _extract_legacy_migration_candidates(moved)
+        self.assertEqual(expected_headings, headings)
+        self.assertNotEqual(expected_candidates, normalize_candidates(candidates))
 
     def test_copy_failure_rolls_back_created_files_and_directories(self):
         real_open = aide_install.os.open
