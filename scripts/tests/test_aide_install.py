@@ -131,6 +131,1416 @@ class AideInstallTests(unittest.TestCase):
         after = {p.relative_to(self.target): p.read_bytes() for p in self.target.rglob("*") if p.is_file()}
         self.assertEqual(before, after)
 
+    def test_migrated_legacy_doc_preserves_root_relative_convention_link(self):
+        old_relative = ".agents/docs/01-branches.md"
+        new_relative = ".agents/docs/aide/01-branches.md"
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / old_relative
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("[Conventions](../../docs/convention.md)\n", encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / new_relative
+        self.assertTrue(migrated.is_file())
+        self.assertIn("[Conventions](../../../docs/convention.md)", migrated.read_text(encoding="utf-8"))
+        self.assertEqual((migrated.parent / "../../../docs/convention.md").resolve(), convention.resolve())
+
+    def test_migration_keeps_nested_quote_fence_marker_as_code_inside_list_quote_fence(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "- > ```markdown\n"
+            "  > > ```\n"
+            "  > [Example](../../docs/missing.md)\n"
+            "  > ```\n"
+            "- [Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("  > > ```\n  > [Example](../../docs/missing.md)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_keeps_blank_line_inside_list_fence_as_code(self):
+
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "- ```markdown\n"
+            "\n"
+            "  [Example](../../docs/missing.md)\n"
+            "  ```\n"
+            "- [Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("  [Example](../../docs/missing.md)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_does_not_treat_definition_after_inline_code_paragraph_as_link(self):
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "`inline code`\n"
+            "[reference]: ../../docs/missing.md\n"
+            "[reference]\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        self.assertEqual(
+            (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8"),
+            original,
+        )
+
+    def test_migration_rewrites_valid_inline_link_with_title(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = '[Conventions](../../docs/convention.md "reference")\n'
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        self.assertIn(
+            '[Conventions](../../../docs/convention.md "reference")',
+            migrated.read_text(encoding="utf-8"),
+        )
+
+    def test_migration_ignores_malformed_inline_link_without_closing_paren(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "[Page](../../docs/missing.md\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("[Page](../../docs/missing.md", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_html_href_rewrite_escapes_query_ampersands(self):
+        page = self.target / "docs/page.md"
+        page.parent.mkdir(parents=True)
+        page.write_text("# Page\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = '<a href="../../docs/page.md?x=1&amp;copy;=1#section">Page</a>\n'
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn(
+            'href="../../../docs/page.md?x=1&amp;copy;=1#section"', content
+        )
+        self.assertNotIn('href="../../../docs/page.md?x=1&copy;=1#section"', content)
+
+    def test_migration_markdown_query_preserves_html_entity_encoding(self):
+        page = self.target / "docs/page.md"
+        page.parent.mkdir(parents=True)
+        page.write_text("# Page\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = "[Page](../../docs/page.md?x=1&amp;copy;=1#frag&amp;copy;=2)\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn(
+            "[Page](../../../docs/page.md?x=1&amp;copy;=1#frag&amp;copy;=2)", content
+        )
+        self.assertNotIn("?x=1&copy;=1", content)
+
+        from cmarkgfm import cmark, github_flavored_markdown_to_html
+        from html.parser import HTMLParser
+
+        class LinkParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.hrefs = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "a":
+                    self.hrefs.extend(value for name, value in attrs if name == "href")
+
+        rendered = github_flavored_markdown_to_html(
+            content, options=cmark.Options.CMARK_OPT_UNSAFE
+        )
+        links = LinkParser()
+        links.feed(rendered)
+        self.assertIn(
+            "../../../docs/page.md?x=1&copy;=1#frag&copy;=2", links.hrefs
+        )
+
+    def test_migration_closes_list_quote_fence_after_tab_separator(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "- > ```markdown\n"
+            "  >\t[Example](../../docs/missing.md)\n"
+            "  >\t```\n"
+            "- [Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("[Example](../../docs/missing.md)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_preserves_tab_separated_quote_marker_inside_nested_fence(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "- > > ````markdown\n"
+            "  >\t> ```\n"
+            "  > > [Example](../../docs/missing.md)\n"
+            "  >\t> ````\n"
+            "- [Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("  > > [Example](../../docs/missing.md)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_markdown_query_preserves_semicolonless_entity_like_text(self):
+        page = self.target / "docs/page.md"
+        page.parent.mkdir(parents=True)
+        page.write_text("# Page\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = "[Page](../../docs/page.md?x=1&copy)\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        from cmarkgfm import cmark, github_flavored_markdown_to_html
+        from html.parser import HTMLParser
+
+        class LinkParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.hrefs = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "a":
+                    self.hrefs.extend(value for name, value in attrs if name == "href")
+
+        def rendered_href(value: str) -> str:
+            rendered = github_flavored_markdown_to_html(
+                value, options=cmark.Options.CMARK_OPT_UNSAFE
+            )
+            parser = LinkParser()
+            parser.feed(rendered)
+            return parser.hrefs[0]
+
+        self.assertEqual(rendered_href(original), "../../docs/page.md?x=1&copy")
+        self.assertEqual(rendered_href(content), "../../../docs/page.md?x=1&copy")
+
+    def test_migration_closes_two_space_top_level_fence_with_unindented_marker(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "  ```markdown\n"
+            "[Example](../../docs/missing.md)\n"
+            "```\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("[Example](../../docs/missing.md)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_ends_list_raw_html_block_before_outer_link(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "- <div>\n"
+            "  embedded content\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_ignores_escaped_html_tag_but_rewrites_real_neighbor(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "\\<a href=\"../../docs/missing.md\">literal</a>\n"
+            '<a href="../../docs/convention.md">real</a>\n'
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("\\<a href=\"../../docs/missing.md\">literal</a>", content)
+        self.assertIn('href="../../../docs/convention.md"', content)
+
+    def test_migration_ignores_reference_definition_with_unescaped_inner_angle(self):
+        convention = self.target / "docs/convention file.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "[bad]: <../../docs/missing<fake.md>\n"
+            "\n"
+            "[good]: <../../docs/convention file.md>\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("[bad]: <../../docs/missing<fake.md>", content)
+        self.assertIn("[good]: <../../../docs/convention%20file.md>", content)
+
+    def test_migration_rewrites_inline_angle_destination_with_spaces(self):
+        convention = self.target / "docs/convention file.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = "[Conventions](<../../docs/convention file.md>)\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("[Conventions](<../../../docs/convention%20file.md>)", content)
+
+    def test_migration_ignores_inline_angle_destination_with_line_ending(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "[linebreak](<../../docs/missing\npath>)\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("[linebreak](<../../docs/missing\npath>)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_preserves_blockquote_fence_marker_as_code_inside_top_level_fence(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "```markdown\n"
+            "> ```\n"
+            "[Example](../../docs/missing.md)\n"
+            "```\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("> ```\n[Example](../../docs/missing.md)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_keeps_unindented_content_in_indented_top_level_fence(self):
+
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "  ```markdown\n"
+            "[Example](../../docs/missing.md)\n"
+            "  ```\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("[Example](../../docs/missing.md)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_keeps_fence_inside_blockquote_nested_in_list(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "- > ```markdown\n"
+            "  > [Example](../../docs/missing.md)\n"
+            "  > ```\n"
+            "- [Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("  > [Example](../../docs/missing.md)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_does_not_extend_unmatched_backtick_across_block_boundary(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = "prose with unmatched `\n# [Conventions](../../docs/convention.md) `\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("# [Conventions](../../../docs/convention.md) `", content)
+
+    def test_migration_preserves_lazy_continuation_inside_nested_blockquote_code_span(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "> > unmatched `\n"
+            "> [Example](../../docs/missing.md) `\n"
+            "\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("> [Example](../../docs/missing.md) `", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_ignores_comment_syntax_inside_inline_textarea(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "before <textarea><!--\n"
+            "[Conventions](../../docs/convention.md)\n"
+            "</textarea>"
+            '<a href="../../docs/convention.md">Conventions</a>\n'
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("before <textarea><!--", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+        self.assertIn('href="../../../docs/convention.md"', content)
+
+    def test_migration_preserves_multiline_code_span_within_paragraph(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "`example\n"
+            "[Example](../../docs/missing.md)`\n"
+            "\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("[Example](../../docs/missing.md)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_ignores_tag_shaped_text_inside_raw_script_content(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        script = self.target / "docs/script.js"
+        script.write_text("// script resource\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            '<script src="../../docs/script.js">\n'
+            "const example = '<a href=\"../../docs/missing.md\">';\n"
+            "</script>\n"
+            '<a href="../../docs/convention.md">Conventions</a>\n'
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn('<script src="../../../docs/script.js">', content)
+        self.assertIn("const example = '<a href=\"../../docs/missing.md\">';", content)
+        self.assertIn('href="../../../docs/convention.md"', content)
+
+    def test_migration_preserves_markdown_shaped_text_inside_raw_p_block(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "<p>\n"
+            "[Example](../../docs/missing.md)\n"
+            "</p>\n"
+            "\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("[Example](../../docs/missing.md)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_does_not_treat_text_prefix_as_thematic_break(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "paragraph\n"
+            "---not-a-break\n"
+            "[reference]: ../../docs/missing.md\n"
+            "[reference]\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("---not-a-break\n[reference]: ../../docs/missing.md", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_ignores_angle_destination_with_unescaped_less_than(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "[Malformed](<../../docs/missing<fake.md>)\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("[Malformed](<../../docs/missing<fake.md>)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_rewrites_link_after_fence_ended_by_blockquote_boundary(self):
+
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "> ```\n"
+            "> example code\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+        self.assertIn("> ```\n> example code\n", content)
+
+    def test_migration_does_not_scan_markdown_link_shaped_html_attribute(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            '<span data-note="[demo](../../docs/missing.md)">text</span>\n'
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn('<span data-note="[demo](../../docs/missing.md)">text</span>', content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_preserves_markdown_link_shaped_text_in_html_pre_block(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "<pre>\n"
+            "[Example](../../docs/missing.md)\n"
+            "</pre>\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("[Example](../../docs/missing.md)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_rewrites_link_after_fence_ended_by_list_boundary(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "- ```\n"
+            "  example code\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+        self.assertIn("- ```\n  example code\n", content)
+
+    def test_migration_rewrites_reference_destination_with_escaped_gt(self):
+        page = self.target / "docs/foo>bar.md"
+        page.parent.mkdir(parents=True)
+        page.write_text("# Page\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = r"[page]: <../../docs/foo\>bar.md>" + "\n\n[page]\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("[page]: <../../../docs/foo%3Ebar.md>", content)
+        self.assertIn("[page]", content)
+
+    def test_migration_rewrites_reference_definition_after_blockquote_comment(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "> <!-- note -->\n"
+            "> [convention]: ../../docs/convention.md\n"
+            "\n"
+            "[convention]\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("> [convention]: ../../../docs/convention.md", content)
+
+    def test_migration_rewrites_reference_definition_after_list_comment(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "- <!-- note -->\n"
+            "  [convention]: ../../docs/convention.md\n"
+            "\n"
+            "  [convention]\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("  [convention]: ../../../docs/convention.md", content)
+
+    def test_migration_rewrites_reference_definition_with_escaped_closing_bracket_label(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        label = r"conven\]tion"
+        original = f"[{label}]: ../../docs/convention.md\n\n[Conventions][{label}]\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn(f"[{label}]: ../../../docs/convention.md", content)
+
+    def test_migration_rewrites_reference_definition_after_html_comment(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "<!-- migration note -->\n"
+            "[convention]: ../../docs/convention.md\n"
+            "\n"
+            "[convention]\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        content = (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8")
+        self.assertIn("[convention]: ../../../docs/convention.md", content)
+        self.assertIn("[convention]", content)
+
+    def test_migration_rewrites_reference_definition_after_heading(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "# Links\n"
+            "[conventions]: ../../docs/convention.md\n\n"
+            "[Conventions][conventions]\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("[conventions]: ../../../docs/convention.md", content)
+
+    def test_migration_rewrites_reference_definition_after_thematic_break(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "---\n"
+            "[conventions]: ../../docs/convention.md\n\n"
+            "[Conventions][conventions]\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        self.assertIn(
+            "[conventions]: ../../../docs/convention.md",
+            migrated.read_text(encoding="utf-8"),
+        )
+
+    def test_migration_rewrites_html_link_inside_pre_block_but_not_markdown_syntax(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "<pre>\n"
+            '<a href="../../docs/convention.md">Conventions</a>\n'
+            "[Example](../../docs/missing.md)\n"
+            "</pre>\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn('href="../../../docs/convention.md"', content)
+        self.assertIn("[Example](../../docs/missing.md)", content)
+
+    def test_migration_rewrites_reference_definition_inside_blockquote(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = "> [conventions]: ../../docs/convention.md\n\n[Conventions][conventions]\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("> [conventions]: ../../../docs/convention.md", content)
+        self.assertEqual((migrated.parent / "../../../docs/convention.md").resolve(), convention.resolve())
+
+    def test_migration_rewrites_reference_definition_inside_list_item(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = "- [conventions]: ../../docs/convention.md\n\n  [Conventions][conventions]\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("- [conventions]: ../../../docs/convention.md", content)
+        self.assertEqual((migrated.parent / "../../../docs/convention.md").resolve(), convention.resolve())
+
+    def test_migration_does_not_treat_inline_html_paragraph_followup_as_reference_definition(self):
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "<span>paragraph content</span>\n"
+            "[conventions]: ../../docs/missing.md\n"
+            "[conventions]\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        self.assertEqual(
+            (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8"),
+            original,
+        )
+
+    def test_migration_does_not_treat_paragraph_continuation_as_reference_definition(self):
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "ordinary `inline code` paragraph\n"
+            "[conventions]: ../../docs/missing.md\n"
+            "[conventions]\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        self.assertEqual(
+            (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8"),
+            original,
+        )
+
+    def test_migration_rejects_broken_link_in_list_continuation_inside_blockquote(self):
+
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = "> - item\n>     [Missing](../../docs/missing.md)\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertNotEqual(code, 0)
+        self.assertIn("リンク先が存在しません", output)
+        self.assertEqual(legacy.read_text(encoding="utf-8"), original)
+        self.assertFalse((self.target / ".agents/docs/aide/01-branches.md").exists())
+
+    def test_migration_rewrites_link_after_unclosed_comment_marker_in_multiline_code_span(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "`<!--\n"
+            "code span continues`\n"
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        self.assertIn("[Conventions](../../../docs/convention.md)", migrated.read_text(encoding="utf-8"))
+
+    def test_migration_rewrites_link_after_comment_marker_inside_quoted_html_attribute(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            '<span data-note="<!--">example</span>\n'
+            "[Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn('<span data-note="<!--">example</span>', content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_preserves_escaped_hash_as_fragment_delimiter(self):
+        target = self.target / "docs/page.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("# Section\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        slash = chr(92)
+        legacy.write_text(
+            "[Section](../../docs/page.md" + slash + "#section)\n",
+            encoding="utf-8",
+        )
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        self.assertIn("[Section](../../../docs/page.md#section)", migrated.read_text(encoding="utf-8"))
+
+    def test_migration_preserves_escaped_question_as_query_delimiter(self):
+        target = self.target / "docs/page.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("# Section\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        slash = chr(92)
+        legacy.write_text(
+            "[Section](../../docs/page.md" + slash + "?view=print#section)\n",
+            encoding="utf-8",
+        )
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        self.assertIn(
+            "[Section](../../../docs/page.md?view=print#section)",
+            migrated.read_text(encoding="utf-8"),
+        )
+
+    def test_migration_decodes_html_entity_in_markdown_destination_for_lookup(self):
+        target = self.target / "docs/foo&bar.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("# Target\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("[Target](../../docs/foo&amp;bar.md)\n", encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("../../../docs/foo%26bar.md", content)
+        self.assertEqual((migrated.parent / "../../../docs/foo&bar.md").resolve(), target.resolve())
+
+    def test_migration_decodes_html_entity_in_html_href_for_lookup(self):
+        target = self.target / "docs/foo&bar.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("# Target\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text('<a href="../../docs/foo&amp;bar.md">Target</a>\n', encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn('href="../../../docs/foo%26bar.md"', content)
+        self.assertEqual((migrated.parent / "../../../docs/foo&bar.md").resolve(), target.resolve())
+
+    def test_migration_rejects_broken_link_after_comment_containing_fence(self):
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "<!--\n"
+            "```markdown\n"
+            "comment example\n"
+            "-->\n"
+            "[Missing](../../docs/missing.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertNotEqual(code, 0)
+        self.assertIn("リンク先が存在しません", output)
+        self.assertTrue(legacy.is_file())
+        self.assertFalse((self.target / ".agents/docs/aide/01-branches.md").exists())
+        self.assertEqual(legacy.read_text(encoding="utf-8"), original)
+
+    def test_migration_rejects_broken_link_after_fence_with_unclosed_comment(self):
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "```html\n"
+            "<!-- unclosed comment example\n"
+            "```\n"
+            "[Missing](../../docs/missing.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertNotEqual(code, 0)
+        self.assertIn("リンク先が存在しません", output)
+        self.assertEqual(legacy.read_text(encoding="utf-8"), original)
+
+    def test_migration_ignores_href_text_in_other_html_attribute_value(self):
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = "<span data-note='href=\"../../docs/example.md\"'>note</span>\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        self.assertEqual(
+            (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8"),
+            original,
+        )
+
+    def test_migration_scans_nested_list_fence_without_masking_following_links(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "- item\n"
+            "  - ```markdown\n"
+            "    [Example](../../docs/missing.md)\n"
+            "    ```\n"
+            "- [Conventions](../../docs/convention.md)\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("[Example](../../docs/missing.md)", content)
+        self.assertIn("[Conventions](../../../docs/convention.md)", content)
+
+    def test_migration_scans_fence_nested_directly_in_list_item(self):
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "- ```markdown\n"
+            "  [Example](../../docs/missing.md)\n"
+            "  ```\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        self.assertEqual(
+            (self.target / ".agents/docs/aide/01-branches.md").read_text(encoding="utf-8"),
+            original,
+        )
+
+    def test_migration_preserves_percent_encoded_path_punctuation(self):
+        target = self.target / "docs/foo#bar?q.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("# Target\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(
+            "[Target](../../docs/foo%23bar%3Fq.md?mode=1#section)\n",
+            encoding="utf-8",
+        )
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        self.assertIn(
+            "../../../docs/foo%23bar%3Fq.md?mode=1#section",
+            migrated.read_text(encoding="utf-8"),
+        )
+        self.assertEqual(
+            (migrated.parent / "../../../docs/foo#bar?q.md").resolve(), target.resolve()
+        )
+
+    def test_migration_accepts_canonical_target_created_by_another_planned_migration(self):
+        legacy_target = self.target / ".agents/docs/02-issues.md"
+        legacy_target.parent.mkdir(parents=True)
+        legacy_target.write_text("# Issues\n", encoding="utf-8")
+        canonical_target = ".agents/docs/aide/02-issues.md"
+        old = ".agents/docs/01-branches.md"
+        new = ".agents/docs/aide/01-branches.md"
+        content = b"[Issues](02-issues.md)\n"
+
+        rewritten = aide_install._preserve_migrated_links(
+            self.target,
+            old,
+            new,
+            content,
+            {".agents/docs/02-issues.md": canonical_target},
+            [],
+            [(".agents/docs/02-issues.md", canonical_target)],
+        )
+
+        self.assertEqual(rewritten, content)
+        self.assertFalse((self.target / canonical_target).exists())
+
+    def test_migration_link_target_already_cleaned_maps_to_canonical_before_existence_check(self):
+        legacy_dir = self.target / ".agents/docs"
+        canonical_dir = legacy_dir / "aide"
+        legacy_dir.mkdir(parents=True)
+        canonical_dir.mkdir(parents=True)
+        legacy = legacy_dir / "01-branches.md"
+        canonical_target = canonical_dir / "02-issues.md"
+        canonical_target.write_bytes(
+            aide_install.source_path(".agents/docs/aide/02-issues.md").read_bytes()
+        )
+        legacy.write_text("[Issues](02-issues.md#起票)\n", encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        migrated = canonical_dir / "01-branches.md"
+        self.assertEqual(code, 0, output)
+        self.assertIn("[Issues](02-issues.md#起票)", migrated.read_text(encoding="utf-8"))
+        self.assertEqual((migrated.parent / "02-issues.md").resolve(), canonical_target.resolve())
+
+    def test_migration_scans_nested_image_inside_link_label(self):
+        convention = self.target / "docs/image.png"
+        convention.parent.mkdir(parents=True)
+        convention.write_bytes(b"fixture")
+        page = self.target / "docs/page.md"
+        page.write_text("# Page\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(
+            "[Page with ![icon](../../docs/image.png)](../../docs/page.md)\n",
+            encoding="utf-8",
+        )
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("![icon](../../../docs/image.png)", content)
+        self.assertEqual(
+            (migrated.parent / "../../../docs/image.png").resolve(), convention.resolve()
+        )
+
+    def test_migration_decodes_backslash_escaped_destination_punctuation(self):
+        target = self.target / "docs/foo(bar).md"
+        target.parent.mkdir(parents=True)
+        target.write_text("# Page\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("[Page](../../docs/foo" + chr(92) + "(bar" + chr(92) + ").md)\n", encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        content = migrated.read_text(encoding="utf-8")
+        self.assertIn("../../../docs/foo%28bar%29.md", content)
+        self.assertEqual(
+            (migrated.parent / "../../../docs/foo(bar).md").resolve(), target.resolve()
+        )
+
+    def test_migration_does_not_treat_html_comments_or_prose_as_attributes(self):
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            '<!-- href="../../docs/not-a-link.md" -->\n'
+            'The text href="../../docs/not-a-link.md" is an example.\n'
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        self.assertEqual(migrated.read_text(encoding="utf-8"), original)
+
+    def test_migration_scans_real_html_href_attribute(self):
+        target = self.target / "docs/page.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("# Page\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text('<a href="../../docs/page.md">Page</a>\n', encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        self.assertIn('href="../../../docs/page.md"', migrated.read_text(encoding="utf-8"))
+
+    def test_migration_does_not_treat_backtick_with_invalid_info_string_as_fence(self):
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = "``` example ` invalid info\n[Missing](../../docs/missing.md)\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertNotEqual(code, 0)
+        self.assertIn("修正が必要", output)
+        self.assertTrue(legacy.is_file())
+        self.assertFalse((self.target / ".agents/docs/aide/01-branches.md").exists())
+        self.assertEqual(legacy.read_text(encoding="utf-8"), original)
+
+    def test_migration_does_not_treat_tab_indented_backticks_as_fence(self):
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = "\t```\n# Heading\n[Missing](../../docs/missing.md)\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertNotEqual(code, 0)
+        self.assertIn("修正が必要", output)
+        self.assertTrue(legacy.is_file())
+        self.assertFalse((self.target / ".agents/docs/aide/01-branches.md").exists())
+        self.assertEqual(legacy.read_text(encoding="utf-8"), original)
+
+    def test_migration_link_to_cleaned_legacy_duplicate_targets_canonical_file(self):
+        legacy_dir = self.target / ".agents/docs"
+        canonical_dir = legacy_dir / "aide"
+        legacy_dir.mkdir(parents=True)
+        canonical_dir.mkdir(parents=True)
+        legacy_source = legacy_dir / "01-branches.md"
+        legacy_target = legacy_dir / "02-issues.md"
+        canonical_target = canonical_dir / "02-issues.md"
+        legacy_source.write_text("[Issues](02-issues.md#setup)\n", encoding="utf-8")
+        legacy_target.write_text("# Old issues\n", encoding="utf-8")
+        canonical_target.write_bytes(
+            aide_install.source_path(".agents/docs/aide/02-issues.md").read_bytes()
+        )
+
+        code, output = self.run_cli("--apply")
+
+        migrated = canonical_dir / "01-branches.md"
+        self.assertEqual(code, 0, output)
+        self.assertFalse(legacy_target.exists())
+        self.assertTrue(canonical_target.is_file())
+        self.assertIn("[Issues](02-issues.md#setup)", migrated.read_text(encoding="utf-8"))
+        self.assertEqual((migrated.parent / "02-issues.md").resolve(), canonical_target.resolve())
+
+    def test_migration_leaves_indented_code_example_unchanged(self):
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy = self.target / ".agents/docs/01-branches.md"
+        legacy.parent.mkdir(parents=True)
+        original = (
+            "    [Indented example](../../docs/convention.md)\n"
+            "> ```markdown\n"
+            "> [Quoted fence example](../../docs/convention.md)\n"
+            "> ```\n"
+        )
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = self.target / ".agents/docs/aide/01-branches.md"
+        self.assertEqual(migrated.read_text(encoding="utf-8"), original)
+
+    def test_migration_preserves_sibling_fragments_external_links_and_code_examples(self):
+        old_relative = ".agents/docs/01-branches.md"
+        new_relative = ".agents/docs/aide/01-branches.md"
+        convention = self.target / "docs/convention.md"
+        convention.parent.mkdir(parents=True)
+        convention.write_text("# Conventions\n", encoding="utf-8")
+        legacy_dir = self.target / ".agents/docs"
+        legacy_dir.mkdir(parents=True)
+        (legacy_dir / "02-issues.md").write_text("# Setup\n", encoding="utf-8")
+        (legacy_dir / "01-branches.md").write_text(
+            "# Heading\n"
+            "[Conventions](../../docs/convention.md)\n"
+            "[Sibling](02-issues.md#setup)\n"
+            "[This heading](#heading)\n"
+            "[External](https://example.test/path?q=1#part)\n"
+            "`[Inline example](../../docs/convention.md)`\n"
+            "```markdown\n"
+            "[Fenced example](../../docs/convention.md)\n"
+            "```\n",
+            encoding="utf-8",
+        )
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        migrated = (self.target / new_relative).read_text(encoding="utf-8")
+        self.assertIn("[Conventions](../../../docs/convention.md)", migrated)
+        self.assertIn("[Sibling](02-issues.md#setup)", migrated)
+        self.assertIn("[This heading](#heading)", migrated)
+        self.assertIn("[External](https://example.test/path?q=1#part)", migrated)
+        self.assertIn("`[Inline example](../../docs/convention.md)`", migrated)
+        self.assertIn("[Fenced example](../../docs/convention.md)", migrated)
+        self.assertEqual(migrated.count("](../../docs/convention.md)"), 2)
+
+    def test_migration_fails_before_success_for_broken_local_link(self):
+        old_relative = ".agents/docs/01-branches.md"
+        new_relative = ".agents/docs/aide/01-branches.md"
+        legacy = self.target / old_relative
+        legacy.parent.mkdir(parents=True)
+        original = "[Missing](../../docs/missing.md)\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertNotEqual(code, 0)
+        self.assertIn("修正が必要", output)
+        self.assertTrue(legacy.is_file())
+        self.assertFalse((self.target / new_relative).exists())
+        self.assertEqual(legacy.read_text(encoding="utf-8"), original)
+
+    def test_migration_fails_before_success_for_link_outside_repository(self):
+        old_relative = ".agents/docs/01-branches.md"
+        new_relative = ".agents/docs/aide/01-branches.md"
+        legacy = self.target / old_relative
+        legacy.parent.mkdir(parents=True)
+        original = "[Outside](../../../outside.md)\n"
+        legacy.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertNotEqual(code, 0)
+        self.assertIn("修正が必要", output)
+        self.assertIn("リポジトリ外", output)
+        self.assertTrue(legacy.is_file())
+        self.assertFalse((self.target / new_relative).exists())
+        self.assertEqual(legacy.read_text(encoding="utf-8"), original)
+
     def test_rerun_moves_legacy_docs_and_removes_duplicate_old_paths(self):
         for old, new in aide_install.LEGACY_DOCS.items():
             legacy = self.target / old
