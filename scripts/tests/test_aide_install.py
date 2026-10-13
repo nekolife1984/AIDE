@@ -27,7 +27,7 @@ def _normalize_one_terminal_newline(value: bytes) -> bytes:
 def _extract_legacy_migration_candidates(
     skill: bytes,
 ) -> tuple[list[bytes], list[tuple[bytes | None, bytes, bytes, bytes]]]:
-    start = skill.index("旧版がルート".encode("utf-8"))
+    start = skill.index("ルート `AGENTS.md` 全体として配布".encode("utf-8"))
     end = skill.index("案内削除を依頼された場合".encode("utf-8"), start)
     lines = skill[start:end].splitlines(keepends=True)
     headings = []
@@ -1901,12 +1901,10 @@ class AideInstallTests(unittest.TestCase):
         self.assertIn("ファイル末尾にある改行コード1つ", skill)
         self.assertIn("既存の案内外の記載が保たれている", skill)
 
-    def test_aide_init_recognizes_only_exact_frozen_legacy_agents_documents(self):
+    def test_aide_init_recognizes_only_exact_current_agents_document(self):
         skill = (aide_install.REPO_ROOT / ".agents/skills/aide-init/SKILL.md").read_bytes()
         versions = (
-            ("旧配布版（#41、0757dbe）", "legacy_agents_0757dbe.md"),
-            ("旧配布版（#61、127874c）", "legacy_agents_127874c.md"),
-            ("後続配布版（PR #66後、fa60a6a）", "legacy_agents_current.md"),
+            ("現行配布版（PR #66後、fa60a6a）", "legacy_agents_current.md"),
         )
 
         candidate_headings, code_blocks = _extract_legacy_migration_candidates(skill)
@@ -1937,13 +1935,9 @@ class AideInstallTests(unittest.TestCase):
                 for ending in (b"", b"\n", b"\r\n"):
                     self.assertIn(_normalize_one_terminal_newline(normalized_fixture + ending), known_candidates)
 
-        self.assertEqual(len(versions), len(known_candidates), "legacy candidates must be distinct")
+        self.assertEqual(len(versions), len(known_candidates), "candidates must be distinct")
 
-        for filename in (
-            "legacy_agents_0757dbe.md",
-            "legacy_agents_127874c.md",
-            "legacy_agents_current.md",
-        ):
+        for filename in ("legacy_agents_current.md",):
             fixture = (Path(__file__).parent / "fixtures" / filename).read_bytes()
             mutations = (
                 fixture.replace("開発ルール".encode("utf-8"), "開発規則".encode("utf-8"), 1),
@@ -1960,9 +1954,7 @@ class AideInstallTests(unittest.TestCase):
     def test_aide_init_candidate_census_detects_every_migration_fence(self):
         skill = (aide_install.REPO_ROOT / ".agents/skills/aide-init/SKILL.md").read_bytes()
         versions = (
-            ("旧配布版（#41、0757dbe）", "legacy_agents_0757dbe.md"),
-            ("旧配布版（#61、127874c）", "legacy_agents_127874c.md"),
-            ("後続配布版（PR #66後、fa60a6a）", "legacy_agents_current.md"),
+            ("現行配布版（PR #66後、fa60a6a）", "legacy_agents_current.md"),
         )
         expected_headings = [heading.encode("utf-8") for heading, _ in versions]
         expected_candidates = []
@@ -2010,24 +2002,27 @@ class AideInstallTests(unittest.TestCase):
         self.assertEqual(expected_headings + [b"Unexpected candidate"], headings)
         self.assertEqual(expected_candidates, normalize_candidates(candidates))
 
-        second_heading = b"#### " + expected_headings[1] + newline * 2
-        moved = skill.replace(second_heading, b"", 1)
-        first_marker = b"#### " + expected_headings[0] + newline * 2 + b"```markdown" + newline
-        moved = moved.replace(
-            first_marker,
-            b"#### "
-            + expected_headings[0]
-            + newline * 2
-            + b"#### "
-            + expected_headings[1]
-            + newline * 2
-            + b"```markdown"
-            + newline,
-            1,
-        )
+        candidate_heading = b"#### " + expected_headings[0] + newline * 2
+        moved = skill.replace(candidate_heading, b"", 1)
+        position = moved.index(anchor)
+        moved = moved[:position] + candidate_heading + moved[position:]
         headings, candidates = _extract_legacy_migration_candidates(moved)
         self.assertEqual(expected_headings, headings)
         self.assertNotEqual(expected_candidates, normalize_candidates(candidates))
+
+    def test_aide_init_only_keeps_current_agents_fixture_and_approval_boundary(self):
+        fixtures = Path(__file__).parent / "fixtures"
+        self.assertEqual(
+            sorted(path.name for path in fixtures.glob("legacy_agents_*.md")),
+            ["legacy_agents_current.md"],
+        )
+        skill = (aide_install.REPO_ROOT / ".agents/skills/aide-init/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("一致する候補がない、複数候補に曖昧、一部編集・追記済み", skill)
+        self.assertIn("既知版と推測せず停止する", skill)
+        self.assertIn("一意に一致した場合も自動更新せず", skill)
+        self.assertIn("承認前は `AGENTS.md` を作成・変更しない", skill)
 
     def test_rollback_unlink_failure_reports_incomplete_recovery_and_remaining_path(self):
         real_open = aide_install.os.open
