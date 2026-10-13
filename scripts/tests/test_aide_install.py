@@ -1,4 +1,5 @@
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -130,6 +131,116 @@ class AideInstallTests(unittest.TestCase):
         self.assertIn("同一", output)
         after = {p.relative_to(self.target): p.read_bytes() for p in self.target.rglob("*") if p.is_file()}
         self.assertEqual(before, after)
+
+    def test_historical_legacy_docs_report_diffs_and_unchanged_rerun_succeeds(self):
+        fixture_dir = Path(__file__).parent / "fixtures/legacy_docs_71e41cc"
+        fixtures = {
+            ".agents/docs/01-branches.md": "94b3ef4ffaff95f4f487ec139befa12fa232183a25838653e3e9968b35077c06",
+            ".agents/docs/02-issues.md": "d4455911a4ebf4b919bbeaff32f6aa74cef94e63fd5425bcbf07307f66bd0a69",
+            ".agents/docs/03-project.md": "1fbaabcd226e505c378645060677063fed429549b864b30e4ba9d488abcd427d",
+            ".agents/docs/05-quality.md": "241c195bd97cd5f4368a4504b597f0051ffeec470317dca3a0fb820f2e4be62a",
+            ".agents/docs/07-review.md": "b7762f0e3c9ebaac36314b23d6e361985bc135e853896ed446c98aec46834978",
+        }
+        for old, expected_digest in fixtures.items():
+            content = (fixture_dir / Path(old).name).read_bytes()
+            self.assertEqual(hashlib.sha256(content).hexdigest(), expected_digest, old)
+            legacy = self.target / old
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            if old.endswith("05-quality.md"):
+                content = content.replace(b"\n", b"\r\n")
+            legacy.write_bytes(content)
+
+        before_dry_run = {
+            path.relative_to(self.target): path.read_bytes()
+            for path in self.target.rglob("*")
+            if path.is_file()
+        }
+        code, output = self.run_cli("--dry-run")
+
+        self.assertEqual(code, 0, output)
+        for old in fixtures:
+            new = aide_install.LEGACY_DOCS[old]
+            self.assertIn(f"[移動（配布内容に差分あり: {old}）] {new}", output)
+            self.assertIn(f"--- 既存 ({old})", output)
+            self.assertTrue((self.target / old).is_file())
+            self.assertFalse((self.target / new).exists())
+        after_dry_run = {
+            path.relative_to(self.target): path.read_bytes()
+            for path in self.target.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before_dry_run, after_dry_run)
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        before_rerun = {
+            path.relative_to(self.target): path.read_bytes()
+            for path in self.target.rglob("*")
+            if path.is_file()
+        }
+        for old in fixtures:
+            new = aide_install.LEGACY_DOCS[old]
+            expected = (fixture_dir / Path(old).name).read_bytes()
+            if old.endswith("05-quality.md"):
+                expected = expected.replace(b"\n", b"\r\n")
+            self.assertFalse((self.target / old).exists())
+            self.assertEqual((self.target / new).read_bytes(), expected)
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 0, output)
+        for old in fixtures:
+            new = aide_install.LEGACY_DOCS[old]
+            self.assertIn(f"[移行済み旧版（統合案を確認）] {new}", output)
+        after_rerun = {
+            path.relative_to(self.target): path.read_bytes()
+            for path in self.target.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before_rerun, after_rerun)
+
+    def test_edited_historical_migration_target_remains_a_conflict(self):
+        relative = ".agents/docs/aide/01-branches.md"
+        historical = (
+            Path(__file__).parent
+            / "fixtures/legacy_docs_71e41cc/01-branches.md"
+        ).read_bytes()
+        edited = historical.replace(b"main", b"MAIN", 1)
+        self.assertNotEqual(edited, historical)
+        target = self.target / relative
+        target.parent.mkdir(parents=True)
+        target.write_bytes(edited)
+        before_dry_run = {
+            path.relative_to(self.target): path.read_bytes()
+            for path in self.target.rglob("*")
+            if path.is_file()
+        }
+
+        code, output = self.run_cli("--dry-run")
+
+        self.assertEqual(code, 1)
+        self.assertIn(f"[競合] {relative}", output)
+        after_dry_run = {
+            path.relative_to(self.target): path.read_bytes()
+            for path in self.target.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before_dry_run, after_dry_run)
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 1)
+        self.assertIn(f"[競合] {relative}", output)
+        after_apply = {
+            path.relative_to(self.target): path.read_bytes()
+            for path in self.target.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before_dry_run, after_apply)
+        self.assertNotIn("移行済み旧版", output)
+        self.assertEqual(target.read_bytes(), edited)
+        self.assertFalse((self.target / ".agents/project.json").exists())
 
     def test_migrated_legacy_doc_preserves_root_relative_convention_link(self):
         old_relative = ".agents/docs/01-branches.md"

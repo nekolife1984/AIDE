@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
 import html
 import json
 import os
@@ -39,6 +40,14 @@ LEGACY_DOCS = {
         "07-review",
         "08-commit-messages",
     )
+}
+# 71e41cc由来の旧docsをリンク保持移行した内容のSHA-256（CRLFは正規化）。
+LEGACY_DOC_MIGRATION_SHA256 = {
+    ".agents/docs/aide/01-branches.md": "94b3ef4ffaff95f4f487ec139befa12fa232183a25838653e3e9968b35077c06",
+    ".agents/docs/aide/02-issues.md": "d4455911a4ebf4b919bbeaff32f6aa74cef94e63fd5425bcbf07307f66bd0a69",
+    ".agents/docs/aide/03-project.md": "1fbaabcd226e505c378645060677063fed429549b864b30e4ba9d488abcd427d",
+    ".agents/docs/aide/05-quality.md": "241c195bd97cd5f4368a4504b597f0051ffeec470317dca3a0fb820f2e4be62a",
+    ".agents/docs/aide/07-review.md": "b7762f0e3c9ebaac36314b23d6e361985bc135e853896ed446c98aec46834978",
 }
 
 
@@ -84,6 +93,24 @@ def safe_destination(root: Path, relative: str) -> Path:
     if not destination.resolve().is_relative_to(root):
         raise InstallError(f"コピー先が対象ディレクトリ外です: {destination}")
     return destination
+
+
+def _normalize_line_endings(content: bytes) -> bytes:
+    return content.replace(b"\r\n", b"\n")
+
+
+def _migrated_legacy_doc(old: str, content: bytes) -> bytes:
+    if old == ".agents/docs/00_index.md":
+        return content.replace(b"../skills/", b"../../skills/")
+    return content
+
+
+def _is_known_migrated_legacy_doc(relative: str, content: bytes) -> bool:
+    expected = LEGACY_DOC_MIGRATION_SHA256.get(relative)
+    if expected is None:
+        return False
+    digest = hashlib.sha256(_normalize_line_endings(content)).hexdigest()
+    return digest == expected
 
 
 def _markdown_container_content(
@@ -1075,11 +1102,17 @@ def classify(root: Path, files: list[str]) -> tuple[dict[str, str], list[str]]:
         if relative in statuses:
             continue
         if not destination.exists() and legacy_path and legacy_path.exists():
+            assert legacy is not None
             if not legacy_path.is_file():
                 statuses[relative] = "競合（旧配置が通常ファイルではありません）"
                 conflicts.append(relative)
             else:
-                statuses[relative] = f"移動（{legacy}）"
+                migrated = _migrated_legacy_doc(legacy, legacy_path.read_bytes())
+                distributed = source.read_bytes()
+                if _normalize_line_endings(migrated) == _normalize_line_endings(distributed):
+                    statuses[relative] = f"移動（{legacy}）"
+                else:
+                    statuses[relative] = f"移動（配布内容に差分あり: {legacy}）"
             continue
         if not destination.exists():
             statuses[relative] = "追加"
@@ -1090,6 +1123,8 @@ def classify(root: Path, files: list[str]) -> tuple[dict[str, str], list[str]]:
             continue
         if source.read_bytes() == destination.read_bytes():
             statuses[relative] = "同一"
+        elif _is_known_migrated_legacy_doc(relative, destination.read_bytes()):
+            statuses[relative] = "移行済み旧版（統合案を確認）"
         elif relative in SPECIAL_FILES:
             statuses[relative] = "統合案を提示（既存ファイルは保持）"
         else:
@@ -1205,10 +1240,36 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{status}] {relative}")
         if relative in SPECIAL_FILES and status == "統合案を提示（既存ファイルは保持）":
             print(SPECIAL_FILES[relative])
-        elif relative in conflicts and relative != ".agents/project.json" and (target / relative).is_file():
-            source_text = source_path(relative).read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
-            target_text = (target / relative).read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
-            print("".join(difflib.unified_diff(target_text, source_text, fromfile="既存", tofile="AIDE提案")))
+        else:
+            legacy_source = next(
+                (old for old, new in LEGACY_DOCS.items() if new == relative), None
+            )
+            moving_legacy = status.startswith("移動（配布内容に差分あり:")
+            moved_legacy_version = status.startswith("移行済み旧版")
+            has_file_conflict = relative in conflicts and relative != ".agents/project.json"
+            if moving_legacy or moved_legacy_version or has_file_conflict:
+                current_path = (
+                    target / legacy_source
+                    if moving_legacy and legacy_source
+                    else target / relative
+                )
+                if current_path.is_file():
+                    source_text = source_path(relative).read_text(
+                        encoding="utf-8", errors="replace"
+                    ).splitlines(keepends=True)
+                    target_text = current_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    ).splitlines(keepends=True)
+                    print(
+                        "".join(
+                            difflib.unified_diff(
+                                target_text,
+                                source_text,
+                                fromfile=f"既存 ({current_path.relative_to(target)})",
+                                tofile="AIDE配布内容",
+                            )
+                        )
+                    )
 
     for relative in legacy_cleanup:
         if conflicts:
