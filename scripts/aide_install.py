@@ -220,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{status}] {relative}")
         if relative in SPECIAL_FILES and status == "統合案を提示（既存ファイルは保持）":
             print(SPECIAL_FILES[relative])
-        elif relative in conflicts and (target / relative).is_file():
+        elif relative in conflicts and relative != ".agents/project.json" and (target / relative).is_file():
             source_text = source_path(relative).read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
             target_text = (target / relative).read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
             print("".join(difflib.unified_diff(target_text, source_text, fromfile="既存", tofile="AIDE提案")))
