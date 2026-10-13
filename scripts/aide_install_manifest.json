@@ -12,6 +12,7 @@
     ".agents/skills/aide-init/SKILL.md",
     ".agents/skills/aide-workflow/SKILL.md",
     ".agents/templates/aide/AGENTS.md.template",
+    ".agents/project.json",
     ".gitignore"
   ]
 }

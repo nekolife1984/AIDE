@@ -1,10 +1,14 @@
 import contextlib
 import io
+import json
+import os
 import shutil
 import subprocess
+import sys
+import tarfile
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest import mock
 
 import scripts.aide_install as aide_install
@@ -34,7 +38,11 @@ class AideInstallTests(unittest.TestCase):
         self.assertEqual(code, 0)
         for relative in aide_install.load_manifest():
             self.assertTrue((self.target / relative).is_file(), relative)
-        self.assertFalse((self.target / ".agents/project.json").exists())
+        project_config = json.loads((self.target / ".agents/project.json").read_text(encoding="utf-8"))
+        self.assertIsNone(project_config["repository"])
+        self.assertIsNone(project_config["project"])
+        self.assertEqual(project_config["project_defaults"], {"title": None, "visibility": "PRIVATE"})
+        self.assertFalse((self.target / ".agents/project.local.json").exists())
 
     def test_workflow_skill_is_distributed_with_resolvable_guidance(self):
         relative = ".agents/skills/aide-workflow/SKILL.md"
@@ -56,7 +64,8 @@ class AideInstallTests(unittest.TestCase):
 
         errors, _ = validate_repository(self.target)
         self.assertEqual(errors, [])
-        self.assertFalse((self.target / ".agents/project.json").exists())
+        self.assertTrue((self.target / ".agents/project.json").is_file())
+        self.assertFalse((self.target / ".agents/project.local.json").exists())
 
     def test_rerun_reports_identical_and_preserves_files(self):
         self.assertEqual(self.run_cli("--apply")[0], 0)
@@ -154,11 +163,52 @@ class AideInstallTests(unittest.TestCase):
             {Path("AGENTS.md"), Path(".agents/docs/aide/00_index.md")},
         )
 
-    def test_project_configuration_and_secrets_are_not_in_manifest(self):
+    def test_manifest_includes_only_neutral_project_template(self):
         manifest = aide_install.load_manifest()
-        self.assertNotIn(".agents/project.json", manifest)
+        self.assertIn(".agents/project.json", manifest)
         self.assertNotIn(".agents/project.local.json", manifest)
         self.assertFalse(any("token" in path.lower() or ".env" in path for path in manifest))
+
+        config = json.loads((aide_install.REPO_ROOT / ".agents/project.json").read_text(encoding="utf-8"))
+        self.assertIsNone(config["repository"])
+        self.assertIsNone(config["project"])
+
+    def test_template_clone_has_neutral_project_configuration(self):
+        clone = self.target / "template-clone"
+        result = subprocess.run(
+            ["git", "clone", "--no-hardlinks", str(aide_install.REPO_ROOT), str(clone)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = json.loads((clone / ".agents/project.json").read_text(encoding="utf-8"))
+        self.assertIsNone(config["repository"])
+        self.assertIsNone(config["project"])
+        self.assertFalse((clone / ".agents/project.local.json").exists())
+
+    def test_existing_project_config_conflicts_without_overwrite_or_value_output(self):
+        relative = ".agents/project.json"
+        config_path = self.target / relative
+        config_path.parent.mkdir(parents=True)
+        sentinel = "fixture-private-project-value"
+        original = json.dumps(
+            {
+                "schema_version": 1,
+                "repository": "fixture-owner/fixture-repository",
+                "project_defaults": {"title": sentinel, "visibility": "PRIVATE"},
+                "project": {"number": 999, "title": sentinel},
+            }
+        )
+        config_path.write_text(original, encoding="utf-8")
+
+        code, output = self.run_cli("--apply")
+
+        self.assertEqual(code, 1)
+        self.assertIn(f"[競合] {relative}", output)
+        self.assertNotIn(sentinel, output)
+        self.assertEqual(config_path.read_text(encoding="utf-8"), original)
+        self.assertEqual(list(config_path.parent.iterdir()), [config_path])
 
     def test_tracked_project_config_is_neutral_template(self):
         import json
@@ -333,13 +383,73 @@ class AideInstallTests(unittest.TestCase):
         package = packages[0] if isinstance(packages, list) else next(iter(packages.values()))
         packaged_paths = {entry["path"] for entry in package["files"]}
         self.assertNotIn("AGENTS.md", packaged_paths)
-        self.assertNotIn(".agents/project.json", packaged_paths)
+        self.assertIn(".agents/project.json", packaged_paths)
         self.assertNotIn(".agents/project.local.json", packaged_paths)
         for relative in aide_install.load_manifest():
             source = aide_install.source_path(relative).relative_to(aide_install.REPO_ROOT)
             if relative == ".gitignore":
                 source = aide_install.SOURCE_FALLBACKS[relative]
             self.assertIn(source.as_posix(), packaged_paths)
+
+    @unittest.skipUnless(shutil.which("node") and shutil.which("npm"), "Node.js and npm are required")
+    def test_published_npm_cli_bootstraps_neutral_project_config(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            package_dir = root / "packages"
+            package_dir.mkdir()
+            env = dict(os.environ, npm_config_cache=str(root / "npm-cache"))
+            result = subprocess.run(
+                ["npm", "pack", "--ignore-scripts", "--json", "--pack-destination", str(package_dir)],
+                cwd=aide_install.REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            package = json.loads(result.stdout)[0]
+            archive_path = package_dir / package["filename"]
+            extracted = root / "extracted"
+            extracted.mkdir()
+            with tarfile.open(archive_path, "r:gz") as archive:
+                for member in archive.getmembers():
+                    member_path = PurePosixPath(member.name)
+                    self.assertFalse(member_path.is_absolute())
+                    self.assertNotIn("..", member_path.parts)
+                    if member.isdir():
+                        continue
+                    self.assertTrue(member.isfile(), member.name)
+                    destination = extracted.joinpath(*member_path.parts)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    source = archive.extractfile(member)
+                    if source is None:
+                        raise AssertionError(f"Unable to read package member: {member.name}")
+                    destination.write_bytes(source.read())
+
+            target = root / "existing-repository"
+            target.mkdir()
+            git_result = subprocess.run(
+                ["git", "init", "--initial-branch=main", str(target)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(git_result.returncode, 0, git_result.stderr)
+            cli = extracted / "package/bin/aide-install.js"
+            cli_result = subprocess.run(
+                ["node", str(cli), str(target), "--apply"],
+                env=dict(env, PYTHON=sys.executable),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(cli_result.returncode, 0, cli_result.stderr)
+            config = json.loads((target / ".agents/project.json").read_text(encoding="utf-8"))
+            self.assertIsNone(config["repository"])
+            self.assertIsNone(config["project"])
+            self.assertEqual(config["project_defaults"], {"title": None, "visibility": "PRIVATE"})
+            self.assertFalse((target / ".agents/project.local.json").exists())
+            self.assertFalse((target / "AGENTS.md").exists())
 
     def test_symlink_destination_is_rejected_before_writing(self):
         outside = self.target.parent / f"{self.target.name}-outside"
