@@ -15,7 +15,7 @@ Issueの起票・対応、開発変更、レビュー、作業の再開・中断
 
 1. リポジトリルートで `git status --short --branch` を確認し、対象Repository・依頼範囲・既存の変更を特定する。
 2. [ブランチ](../../docs/aide/01-branches.md)、[情報保護](../../docs/aide/06-security.md)、[コミット](../../docs/aide/08-commit-messages.md)を確認する。工程ごとの参照は、これらの共通ルールを省略するためのものではない。
-3. `.agents/project.local.json` があればローカル設定を、なければテンプレート設定 `.agents/project.json` を対象Repositoryと照合する。ローカル設定がなくProject未設定なら[aide-init](../aide-init/SKILL.md)へ進み、その承認・停止条件に従う。設定・対象が不一致または判断不能なら変更せず停止する。
+3. [読み取り専用の設定解決](../../docs/aide/03-project.md#読み取り専用の設定解決)に従い、同じcloneの主作業ツリーの設定を対象Repository・GitHubと照合する。未設定なら主作業ツリーでのみ[aide-init](../aide-init/SKILL.md)へ進み、その承認・停止条件に従う。リンク側では初期化・設定更新せず、主側での対応を依頼する。不一致・判断不能なら変更せず停止する。
 
 ## 工程と参照先
 

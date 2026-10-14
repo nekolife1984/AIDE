@@ -1658,8 +1658,8 @@ class AideInstallTests(unittest.TestCase):
             legacy = self.target / old
             legacy.parent.mkdir(parents=True, exist_ok=True)
             content = (aide_install.REPO_ROOT / new).read_bytes()
-            if old.endswith("00_index.md"):
-                content = content.replace(b"../../skills/", b"../skills/")
+            # 旧配置fixtureでは正本文書からスキルへの相対パスを一段浅くする。
+            content = content.replace(b"../../skills/", b"../skills/")
             legacy.write_bytes(content)
 
         code, output = self.run_cli("--dry-run")
@@ -1846,8 +1846,9 @@ class AideInstallTests(unittest.TestCase):
     def test_root_agents_guides_local_project_config_precedence(self):
         agents = (aide_install.REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
-        self.assertIn(".agents/project.local.json` があればそれを", agents)
-        self.assertIn("なければテンプレート設定 `.agents/project.json`", agents)
+        self.assertIn("03-project.md#読み取り専用の設定解決", agents)
+        self.assertIn("主作業ツリー", agents)
+        self.assertIn("リンク作業ツリーでは初期化・設定更新を行わない", agents)
 
     def test_gitignore_template_fallback_is_available_for_npm_packages(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -1870,8 +1871,15 @@ class AideInstallTests(unittest.TestCase):
         self.assertIn("統合案", output)
         self.assertEqual(agents.read_text(encoding="utf-8"), "custom agents\n")
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "custom ignore\n")
-        self.assertEqual((self.target / ".agents/templates/aide/AGENTS.md.template").read_bytes(),
-                         (aide_install.REPO_ROOT / ".agents/templates/aide/AGENTS.md.template").read_bytes())
+        template = aide_install.REPO_ROOT / ".agents/templates/aide/AGENTS.md.template"
+        self.assertEqual(
+            (self.target / ".agents/templates/aide/AGENTS.md.template").read_bytes(),
+            template.read_bytes(),
+        )
+        installed_guidance = (self.target / ".agents/templates/aide/AGENTS.md.template").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("03-project.md#読み取り専用の設定解決", installed_guidance)
 
     def test_manifest_installs_template_but_never_root_agents_file(self):
         manifest = aide_install.load_manifest()

@@ -7,5 +7,5 @@
 
 ### GitHub Project
 
-- GitHub Project情報は `.agents/project.local.json` があればそれを、なければテンプレート設定 `.agents/project.json` を参照
-- ローカル設定がなくテンプレート設定の `project` が `null` の場合は、[aide-initスキル](.agents/skills/aide-init/SKILL.md)で初期化
+- GitHub Project情報は[読み取り専用の設定解決](.agents/docs/aide/03-project.md#読み取り専用の設定解決)に従い、同じcloneの主作業ツリーの設定を参照・照合
+- 未設定なら主作業ツリーでのみ[aide-initスキル](.agents/skills/aide-init/SKILL.md)で初期化。リンク作業ツリーでは初期化・設定更新を行わない
