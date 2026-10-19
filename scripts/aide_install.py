@@ -28,6 +28,13 @@ SPECIAL_FILES = {
     ".gitignore": "既存内容を保持します。必要に応じて次を既存ルールへ統合してください:\n\n# ローカル環境設定（例示ファイルは追跡可能）\n.env\n.env.*\n!.env.example\n\n# cloneごとのGitHub Project設定\n/.agents/project.local.json\n",
 }
 LOCAL_PROJECT_CONFIG = ".agents/project.local.json"
+PROJECT_TEMPLATE = Path("scripts") / "templates" / "project.json"
+NEUTRAL_PROJECT_CONFIG = {
+    "schema_version": 1,
+    "repository": None,
+    "project_defaults": {"title": None, "visibility": "PRIVATE"},
+    "project": None,
+}
 SOURCE_FALLBACKS = {
     ".gitignore": Path("scripts") / "templates" / "gitignore",
 }
@@ -60,12 +67,24 @@ class InstallError(Exception):
 
 
 def source_path(relative: str) -> Path:
+    if relative == ".agents/project.json":
+        # Never distribute the source clone's potentially shared live settings.
+        return REPO_ROOT / PROJECT_TEMPLATE
     source = REPO_ROOT / relative
     if source.is_file():
         return source
     fallback = SOURCE_FALLBACKS.get(relative)
     fallback_path = REPO_ROOT / fallback if fallback else None
     return fallback_path if fallback_path and fallback_path.is_file() else source
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("Duplicate JSON key")
+        value[key] = item
+    return value
 
 
 def load_manifest() -> list[str]:
@@ -84,6 +103,14 @@ def load_manifest() -> list[str]:
             raise InstallError(f"不正なマニフェストパス: {item}")
         if not source_path(item).is_file():
             raise InstallError(f"コピー元が存在しません: {item}")
+        if item == ".agents/project.json":
+            try:
+                content = source_path(item).read_text(encoding="utf-8")
+                value = json.loads(content, object_pairs_hook=_unique_json_object)
+            except (OSError, UnicodeError, ValueError):
+                raise InstallError("配布用Projectテンプレートを読み込めません") from None
+            if value != NEUTRAL_PROJECT_CONFIG or type(value.get("schema_version")) is not int:
+                raise InstallError("配布用Projectテンプレートが中立値ではありません")
     return files
 
 
