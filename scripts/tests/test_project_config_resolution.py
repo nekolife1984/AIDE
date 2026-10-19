@@ -75,8 +75,15 @@ def regular_file(root, relative):
 
 
 def config_json(path):
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('Duplicate key')
+            result[key] = value
+        return result
     try:
-        return json.loads(path.read_text(encoding='utf-8'))
+        return json.loads(path.read_text(encoding='utf-8'), object_pairs_hook=unique_object)
     except (UnicodeError, ValueError):
         raise ContractStop('Invalid configuration encoding or JSON') from None
 
@@ -130,11 +137,31 @@ def resolve_documented_config(cwd, env):
     identities = [origin_identity(git(path, 'git remote get-url origin', env)) for path in (current, primary)]
     if identities[0] != identities[1]:
         raise ContractStop('Origin mismatch')
-    for path in {current, primary}:
-        template = regular_file(path, '.agents/project.json')
-        if config_json(template) != TEMPLATE:
-            raise ContractStop('Template is not neutral')
+    configurations = {
+        path: config_json(regular_file(path, '.agents/project.json'))
+        for path in {current, primary}
+    }
+    for value in configurations.values():
+        if value == TEMPLATE and type(value['schema_version']) is not int:
+            raise ContractStop('Invalid neutral schema version')
+    shared_value = configurations[primary]
+    if any(value != shared_value for value in configurations.values()):
+        raise ContractStop('Shared configuration mismatch between working trees')
     local = primary / '.agents/project.local.json'
+    if shared_value != TEMPLATE:
+        validate_live_config(shared_value, identities[0])
+        if os.path.lexists(local):
+            raise ContractStop('Shared and local configuration conflict')
+        for path in {current, primary}:
+            if not git(path, 'git ls-files -- .agents/project.json', env):
+                raise ContractStop('Shared configuration must be tracked')
+            ignored = subprocess.run(
+                ['git', 'check-ignore', '-q', '--no-index', '--', '.agents/project.json'],
+                cwd=path, env=env, capture_output=True,
+            )
+            if ignored.returncode != 1:
+                raise ContractStop('Shared configuration must not be ignored')
+        return primary, primary / '.agents/project.json'
     if not os.path.lexists(local):
         if current != primary:
             raise ContractStop('Initialize from the primary working tree')
@@ -149,12 +176,16 @@ def resolve_documented_config(cwd, env):
     )
     if tracked or ignored.returncode:
         raise ContractStop('Local configuration is not private to the clone')
-    value = config_json(local)
+    validate_live_config(config_json(local), identities[0])
+    return primary, local
+
+
+def validate_live_config(value, identity):
     project = value.get('project') if isinstance(value, dict) else None
     if (
         not isinstance(value, dict) or set(value) != set(TEMPLATE)
         or type(value.get('schema_version')) is not int or value['schema_version'] != 1
-        or value.get('repository') != identities[0][1]
+        or value.get('repository') != identity[1]
         or value.get('project_defaults') != TEMPLATE['project_defaults']
         or not isinstance(project, dict) or set(project) != set(LIVE['project'])
         or project.get('repository') != value['repository']
@@ -166,10 +197,9 @@ def resolve_documented_config(cwd, env):
     ):
         raise ContractStop('Local configuration schema or identity is invalid')
     kind = 'users' if project['owner_type'] == 'User' else 'orgs'
-    expected_url = f"https://{identities[0][0]}/{kind}/{project['owner']}/projects/{project['number']}"
+    expected_url = f"https://{identity[0]}/{kind}/{project['owner']}/projects/{project['number']}"
     if project['url'] != expected_url:
         raise ContractStop('Project URL does not match the origin host and identity')
-    return primary, local
 
 
 def extract_commands():
@@ -385,12 +415,126 @@ class ProjectConfigResolutionTests(unittest.TestCase):
             template = root / '.agents/project.json'
             template.write_text(json.dumps(LIVE))
             before = self.snapshot()
-            with self.assertRaisesRegex(ContractStop, 'not neutral'):
+            with self.assertRaisesRegex(ContractStop, 'Shared configuration mismatch'):
                 resolve_documented_config(self.linked, self.env)
             self.assertEqual(self.snapshot(), before)
             template.write_text(json.dumps(TEMPLATE))
         with self.assertRaisesRegex(ContractStop, 'Git discovery failed'):
             resolve_documented_config(self.root, self.env)
+
+    def enable_shared(self):
+        self.local.unlink()
+        for root in (self.primary, self.linked):
+            (root / '.agents/project.json').write_text(json.dumps(LIVE))
+
+    def test_shared_primary_and_linked_resolve_without_local_writes(self):
+        self.enable_shared()
+        before = self.snapshot()
+        for root in (self.primary, self.linked, self.linked / '.agents'):
+            self.assertEqual(
+                resolve_documented_config(root, self.env),
+                (self.primary, self.primary / '.agents/project.json'),
+            )
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse(self.local.exists())
+
+    def test_same_repository_new_clone_uses_shared_settings_without_init(self):
+        self.enable_shared()
+        self.command('git', 'add', '.agents/project.json')
+        self.command('git', 'commit', '-m', 'fixture shared configuration')
+        other = self.root / 'team-clone'
+        self.command('git', 'clone', '--no-hardlinks', str(self.primary), str(other))
+        self.command('git', 'remote', 'set-url', 'origin', 'https://github.com/fixture-owner/fixture-repository.git', cwd=other)
+        self.assertEqual(resolve_documented_config(other, self.env), (other, other / '.agents/project.json'))
+        self.assertFalse((other / '.agents/project.local.json').exists())
+
+    def test_shared_and_local_conflict_even_if_identical(self):
+        self.enable_shared()
+        self.write_live(LIVE)
+        before = self.snapshot()
+        with self.assertRaisesRegex(ContractStop, 'conflict'):
+            resolve_documented_config(self.primary, self.env)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_shared_invalid_schema_and_origin_stop_without_disclosure(self):
+        self.enable_shared()
+        variants = []
+        for mutate in (
+            lambda v: v.update(repository='other-owner/other-repository'),
+            lambda v: v.update(schema_version=True),
+            lambda v: v.update(token='fixture-secret'),
+            lambda v: v['project'].update(number=True),
+            lambda v: v['project'].update(url='https://other.example/project'),
+            lambda v: v['project'].pop('node_id'),
+        ):
+            value = copy.deepcopy(LIVE)
+            mutate(value)
+            variants.append(json.dumps(value))
+        variants.extend(('{invalid-json', '[]', json.dumps({**TEMPLATE, 'project': LIVE['project']})))
+        for payload in variants:
+            with self.subTest(payload_type=type(payload).__name__):
+                for root in (self.primary, self.linked):
+                    (root / '.agents/project.json').write_text(payload)
+                before = self.snapshot()
+                with self.assertRaises(ContractStop) as caught:
+                    resolve_documented_config(self.linked, self.env)
+                for private in ('fixture-private-title', 'fixture-private-node', 'fixture-secret'):
+                    self.assertNotIn(private, str(caught.exception))
+                self.assertEqual(self.snapshot(), before)
+
+    def test_shared_file_must_be_tracked_and_not_ignored(self):
+        self.enable_shared()
+        self.command('git', 'rm', '--cached', '.agents/project.json')
+        with self.assertRaisesRegex(ContractStop, 'tracked'):
+            resolve_documented_config(self.primary, self.env)
+        self.command('git', 'add', '.agents/project.json')
+        (self.primary / '.gitignore').write_text('/.agents/project.json\n')
+        with self.assertRaisesRegex(ContractStop, 'not be ignored'):
+            resolve_documented_config(self.primary, self.env)
+
+    def test_shared_symlink_and_linked_revision_mismatch_stop(self):
+        self.enable_shared()
+        shared = self.primary / '.agents/project.json'
+        external = self.root / 'shared-external'
+        external.write_bytes(shared.read_bytes())
+        shared.unlink()
+        shared.symlink_to(external)
+        with self.assertRaises((ContractStop, OSError)):
+            resolve_documented_config(self.linked, self.env)
+        shared.unlink()
+        shared.write_bytes(external.read_bytes())
+        (self.linked / '.agents/project.json').write_text(json.dumps(TEMPLATE))
+        before = self.snapshot()
+        with self.assertRaisesRegex(ContractStop, 'mismatch'):
+            resolve_documented_config(self.linked, self.env)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_invalid_shared_does_not_fall_back_to_valid_local(self):
+        shared = self.primary / '.agents/project.json'
+        for payload in ('{invalid-json', json.dumps({**TEMPLATE, 'repository': 'other/repo'})):
+            shared.write_text(payload)
+            before = self.snapshot()
+            with self.assertRaises(ContractStop):
+                resolve_documented_config(self.primary, self.env)
+            self.assertEqual(self.snapshot(), before)
+
+    def test_neutral_schema_rejects_boolean_version(self):
+        invalid = {**TEMPLATE, 'schema_version': True}
+        for root in (self.primary, self.linked):
+            (root / '.agents/project.json').write_text(json.dumps(invalid))
+        with self.assertRaisesRegex(ContractStop, 'schema version'):
+            resolve_documented_config(self.linked, self.env)
+
+    def test_duplicate_keys_rejected_in_shared_and_local_configuration(self):
+        duplicate = '{"repository":"hidden-value",' + json.dumps(LIVE)[1:]
+        self.local.write_text(duplicate)
+        with self.assertRaisesRegex(ContractStop, 'JSON') as caught:
+            resolve_documented_config(self.primary, self.env)
+        self.assertNotIn('hidden-value', str(caught.exception))
+        self.local.unlink()
+        (self.primary / '.agents/project.json').write_text(duplicate)
+        with self.assertRaisesRegex(ContractStop, 'JSON'):
+            resolve_documented_config(self.primary, self.env)
 
 
 if __name__ == '__main__':

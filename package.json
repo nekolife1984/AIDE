@@ -10,9 +10,9 @@
     "scripts/aide_install.py",
     "scripts/aide_install_manifest.json",
     "scripts/templates/gitignore",
+    "scripts/templates/project.json",
     ".agents/docs/",
     ".agents/templates/",
-    ".agents/project.json",
     ".agents/skills/aide-init/SKILL.md",
     ".agents/skills/aide-workflow/SKILL.md",
     "README.md"

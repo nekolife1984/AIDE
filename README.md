@@ -45,7 +45,7 @@ AIエージェントにGitHub Projectの初期化を依頼し、提示された�
 
 ## 既存リポジトリへ導入する
 
-AIDEをGitHubテンプレートとして新規作成せず、既存リポジトリにAIDEの共通運用資料を追加する場合は、`npx`から実行できます。コピー対象は [`scripts/aide_install_manifest.json`](scripts/aide_install_manifest.json) に限定され、中立な`.agents/project.json`テンプレートは含まれますが、`.agents/project.local.json`、`AGENTS.md`本体、認証情報、ローカルキャッシュは含まれません。`AGENTS.md`用の案内はテンプレートとして配布されます。`.agents/project.local.json`はclone固有の設定としてGitで無視してください。
+AIDEをGitHubテンプレートとして新規作成せず、既存リポジトリにAIDEの共通運用資料を追加する場合は、`npx`から実行できます。コピー対象は [`scripts/aide_install_manifest.json`](scripts/aide_install_manifest.json) に限定され、中立な`.agents/project.json`テンプレートは含まれますが、`.agents/project.local.json`、`AGENTS.md`本体、認証情報、ローカルキャッシュは含まれません。Project設定は専用の中立テンプレート [`scripts/templates/project.json`](scripts/templates/project.json) から供給し、配布元cloneの共有設定はコピー・npm梱包しません。導入先に共有設定がある場合は競合として保持し、値を差分出力せず停止します。`AGENTS.md`用の案内はテンプレートとして配布されます。`.agents/project.local.json`はclone固有の設定としてGitで無視してください。
 
 Node.js 18以降とPython 3.9以降が必要です。まずdry-runで追加・同一・移動・競合と、旧配置・新配置が共存する場合の旧配置ファイルの削除対象を確認します。dry-runはファイルを変更しません。インストーラーは導入先の `AGENTS.md` を作成・変更しません。
 
@@ -71,6 +71,17 @@ python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --app
 既存の `.gitignore` は、Gitで `.agents/project.local.json` が無視されるか確認します（Gitが必要です）。不足時は末尾への追記案を表示し、`--apply` を対話端末（TTY）で実行して `y` または `yes` と回答した場合だけ追記します。既存内容と権限は保持します。拒否・入力終了・非対話実行では、他の導入ファイルも含めて変更せず停止します。既に無視される場合は確認も重複追記もしません。下位の `.agents/.gitignore` の否定ルール等により追記後も無視されない場合は、追記と導入ファイルをロールバックして停止するため、ルールを手動で統合してください。`.env` 等の他の統合案は引き続き手動で確認・反映します。
 
 `.gitignore` がない場合は、dry-runで `[追加] .gitignore` と表示し、`--apply` でマニフェストで指定された配布内容から作成します。dry-runは確認や書き込みを行わず、同一ファイルはそのまま保持され、再実行できます。
+
+## Project設定をチームで共有する
+
+`aide-init`は主作業ツリーで実行し、**共有する／共有しない**を選択します。未回答・未承認のまま保存先を決めません。
+
+- **共有する**：Git管理対象の`.agents/project.json`へ保存。同じRepositoryをcloneしたメンバーは、自分のGitHub認証とProjectアクセス権で共有設定を照合して利用できます。未追跡の初期設定ファイルは、先に利用者がGit追跡対象にしてください。
+- **共有しない**：`.agents/project.json`は中立値のまま、`.agents/project.local.json`（ignore対象・mode `0600`）へ保存。各cloneで初期化します。従来のローカル設定もそのまま利用できます。
+
+共有するとPrivate Projectでも名前・URL・識別情報がRepositoryの読者やGit履歴へ公開されるため、保存前に公開範囲への個別承認を求めます。設定共有はProjectへのアクセス権を付与しません。非共有へ戻しても過去の履歴は消えません。共有・ローカルの両設定に実値がある場合は優先順位で選ばず停止します。切替は主側の`aide-init`で変更・削除内容を確認してから行い、stage・commit・pushは別途承認が必要です。
+
+AIDE自身のテンプレート源泉は中立値を維持します。共有設定を持つ別Repositoryをfork／テンプレートとして再利用した場合は、origin不一致で停止し、承認なしに設定を中立化しません。詳しくは[Project設定の管理](.agents/docs/aide/03-project.md#project設定の管理)を参照してください。
 
 ## 詳細
 

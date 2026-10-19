@@ -1817,7 +1817,7 @@ class AideInstallTests(unittest.TestCase):
 
         self.assertIn(".agents/project.local.json", skill)
         self.assertIn("trackedな`.agents/project.json`", skill)
-        self.assertIn("ローカル設定がない場合だけ", skill)
+        self.assertIn("両方未設定の場合だけ", skill)
 
     def test_aide_init_fails_closed_and_protects_local_config(self):
         skill = (aide_install.REPO_ROOT / ".agents/skills/aide-init/SKILL.md").read_text(
@@ -2314,7 +2314,8 @@ class AideInstallTests(unittest.TestCase):
         package = packages[0] if isinstance(packages, list) else next(iter(packages.values()))
         packaged_paths = {entry["path"] for entry in package["files"]}
         self.assertNotIn("AGENTS.md", packaged_paths)
-        self.assertIn(".agents/project.json", packaged_paths)
+        self.assertNotIn(".agents/project.json", packaged_paths)
+        self.assertIn("scripts/templates/project.json", packaged_paths)
         self.assertNotIn(".agents/project.local.json", packaged_paths)
         for relative in aide_install.load_manifest():
             source = aide_install.source_path(relative).relative_to(aide_install.REPO_ROOT)
