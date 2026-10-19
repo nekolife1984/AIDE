@@ -1866,11 +1866,13 @@ class AideInstallTests(unittest.TestCase):
         agents.write_text("custom agents\n", encoding="utf-8")
         gitignore.write_text("custom ignore\n", encoding="utf-8")
 
-        code, output = self.run_cli("--apply")
+        with mock.patch("sys.stdin.isatty", return_value=True), mock.patch("builtins.input", return_value="yes"):
+            code, output = self.run_cli("--apply")
         self.assertEqual(code, 0)
         self.assertIn("統合案", output)
         self.assertEqual(agents.read_text(encoding="utf-8"), "custom agents\n")
-        self.assertEqual(gitignore.read_text(encoding="utf-8"), "custom ignore\n")
+        self.assertTrue(gitignore.read_text(encoding="utf-8").startswith("custom ignore\n"))
+        self.assertIn("/.agents/project.local.json", gitignore.read_text(encoding="utf-8"))
         template = aide_install.REPO_ROOT / ".agents/templates/aide/AGENTS.md.template"
         self.assertEqual(
             (self.target / ".agents/templates/aide/AGENTS.md.template").read_bytes(),
@@ -2336,7 +2338,8 @@ class AideInstallTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            package = json.loads(result.stdout)[0]
+            packages = json.loads(result.stdout)
+            package = packages[0] if isinstance(packages, list) else next(iter(packages.values()))
             archive_path = package_dir / package["filename"]
             extracted = root / "extracted"
             extracted.mkdir()
