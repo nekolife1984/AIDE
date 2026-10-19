@@ -11,6 +11,9 @@ import json
 import os
 import posixpath
 import re
+import stat
+import subprocess
+import tempfile
 import sys
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
@@ -24,6 +27,7 @@ HTML_BLOCK_TAGS = frozenset(
 SPECIAL_FILES = {
     ".gitignore": "既存内容を保持します。必要に応じて次を既存ルールへ統合してください:\n\n# ローカル環境設定（例示ファイルは追跡可能）\n.env\n.env.*\n!.env.example\n\n# cloneごとのGitHub Project設定\n/.agents/project.local.json\n",
 }
+LOCAL_PROJECT_CONFIG = ".agents/project.local.json"
 SOURCE_FALLBACKS = {
     ".gitignore": Path("scripts") / "templates" / "gitignore",
 }
@@ -1133,15 +1137,71 @@ def classify(root: Path, files: list[str]) -> tuple[dict[str, str], list[str]]:
     return statuses, conflicts
 
 
+def project_config_is_ignored(root: Path) -> bool:
+    """Ask Git, including nested ignore rules; never guess from text matches."""
+    if any(name in os.environ for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")):
+        raise InstallError("Git実行位置の環境変数があるためignore判定を停止しました")
+    try:
+        location = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            capture_output=True, check=False,
+        )
+        if location.returncode:
+            if os.path.lexists(root / ".git"):
+                raise InstallError("Gitリポジトリを確認できないためignore判定を停止しました")
+            # The installer also supports plain directories. Use a disposable
+            # Git directory to evaluate their ignore files without modifying them.
+            with tempfile.TemporaryDirectory(prefix="aide-ignore-") as git_dir:
+                subprocess.run(
+                    ["git", "init", "--bare", "--quiet", git_dir],
+                    capture_output=True, check=True,
+                )
+                result = subprocess.run(
+                    ["git", "--git-dir", git_dir, "--work-tree", str(root),
+                     "check-ignore", "-q", "--no-index", "--", LOCAL_PROJECT_CONFIG],
+                    cwd=root, capture_output=True, check=False,
+                )
+        elif Path(os.fsdecode(location.stdout).rstrip("\n")).resolve() != root:
+            raise InstallError("既存.gitignoreの確認にはGitリポジトリのルートを指定してください")
+        else:
+            result = subprocess.run(
+                ["git", "-C", str(root), "check-ignore", "-q", "--no-index", "--", LOCAL_PROJECT_CONFIG],
+                capture_output=True, check=False,
+            )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise InstallError("Gitによるignore判定に失敗しました") from exc
+    if result.returncode not in (0, 1):
+        raise InstallError("Gitによるignore判定に失敗しました")
+    return result.returncode == 0
+
+
+def plan_gitignore_append(root: Path) -> tuple[bytes, bytes] | None:
+    if project_config_is_ignored(root):
+        return None
+    original = safe_destination(root, ".gitignore").read_bytes()
+    newline = b"\r\n" if b"\r\n" in original else b"\n"
+    separator = b"" if not original or original.endswith(b"\n") else newline
+    suffix = separator + b"# AIDE: clone-local GitHub Project configuration" + newline
+    suffix += b"/.agents/project.local.json" + newline
+    print("[追記案（適用前に確認）] .gitignore")
+    # Show only new lines; existing ignore entries may contain private names.
+    print("+++ .gitignore（既存内容を保持し末尾へ追記）")
+    for line in suffix.decode("utf-8").splitlines():
+        print("+" + line)
+    return original, suffix
+
+
 def install(
     root: Path,
     additions: list[str],
     migrations: list[tuple[str, str]],
     legacy_cleanup: list[str],
+    gitignore_append: tuple[bytes, bytes] | None = None,
 ) -> None:
     created: list[Path] = []
     created_dirs: list[Path] = []
     moved: list[tuple[Path, Path, bytes]] = []
+    appended = False
     try:
         migration_originals: dict[str, bytes] = {}
         migration_contents: dict[str, bytes] = {}
@@ -1182,10 +1242,34 @@ def install(
             moved.append((source, destination, migration_originals[old]))
             if migration_contents[old] != migration_originals[old]:
                 destination.write_bytes(migration_contents[old])
+        if gitignore_append is not None:
+            original, suffix = gitignore_append
+            destination = safe_destination(root, ".gitignore")
+            fd = os.open(destination, os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW)
+            with os.fdopen(fd, "r+b") as output:
+                if not stat.S_ISREG(os.fstat(output.fileno()).st_mode) or output.read() != original:
+                    raise InstallError("承認後に.gitignoreが変更されたため停止しました")
+                appended = True
+                output.write(suffix)
+                output.flush()
+            if destination.read_bytes() != original + suffix or not project_config_is_ignored(root):
+                raise InstallError("追記後もローカル設定が無視されません。下位のignoreルール等を確認してください")
         for relative in legacy_cleanup:
             safe_destination(root, relative).unlink(missing_ok=True)
     except (OSError, InstallError) as exc:
         rollback_failures: list[str] = []
+        if appended and gitignore_append is not None:
+            original, suffix = gitignore_append
+            try:
+                destination = safe_destination(root, ".gitignore")
+                fd = os.open(destination, os.O_RDWR | os.O_NOFOLLOW)
+                with os.fdopen(fd, "r+b") as output:
+                    current = output.read()
+                    if current != original + suffix and not (current.startswith(original) and (original + suffix).startswith(current)):
+                        raise InstallError("追記後に.gitignoreが変更されています")
+                    output.truncate(len(original))
+            except (OSError, InstallError):
+                rollback_failures.append("restore .gitignore: manual recovery required")
         restore_targets: list[Path] = []
         for source, destination, original in reversed(moved):
             try:
@@ -1316,13 +1400,34 @@ def main(argv: list[str] | None = None) -> int:
         print("競合ファイルを退避・統合してから再実行してください。")
         return 1
     if not args.apply:
+        if statuses.get(".gitignore") in ("同一", "統合案を提示（既存ファイルは保持）"):
+            try:
+                plan_gitignore_append(target)
+            except (OSError, InstallError) as exc:
+                print(f"エラー: {exc}", file=sys.stderr)
+                return 2
         print("適用するには同じコマンドに --apply を指定してください。")
         return 0
 
     additions = [path for path, status in statuses.items() if status == "追加"]
     try:
-        install(target, additions, migrations, legacy_cleanup)
-    except InstallError as exc:
+        gitignore_append = None
+        if ".gitignore" not in additions:
+            gitignore_append = plan_gitignore_append(target)
+        if gitignore_append is not None:
+            if not sys.stdin.isatty():
+                raise InstallError("追記には対話的な確認が必要です。TTYから再実行してください（変更なし）")
+            try:
+                answer = input(".gitignoreへ上記を追記しますか？ [y/N]: ")
+            except EOFError:
+                answer = ""
+            if answer.strip().lower() not in ("y", "yes"):
+                print("追記を承認しなかったため、全ての書き込みを停止しました。")
+                return 1
+            if safe_destination(target, ".gitignore").read_bytes() != gitignore_append[0]:
+                raise InstallError("承認後に.gitignoreが変更されたため停止しました")
+        install(target, additions, migrations, legacy_cleanup, gitignore_append)
+    except (OSError, InstallError) as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         return 2
     print(
