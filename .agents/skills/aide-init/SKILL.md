@@ -95,7 +95,7 @@ gh auth refresh --hostname github.com --scopes project
 
 コマンド実行前に、`GH_HOST`（または明示したhostname）、`gh auth status`の対象アカウント、Repositoryの`origin` URLのホストが一致することを確認する。originは秘密情報を出さない形式で取得し、HTTPSならURLのauthority、SSHなら`[user@]host:path`のhost部分を比較する。GitHub.com利用時はoriginが`github.com`でなければ停止する。Enterprise利用時はoriginが指定ホストと完全一致しなければ停止する。URLの形式が判別不能、ホストが曖昧、認証が別ホストにしかない場合も停止し、ホストを推測したりGitHub.comへ切り替えたりしない。
 
-1. 対象ホストを固定し、全ての`gh`認証確認・検索・取得・作成・更新・読み戻しに同一の`GH_HOST`、または各コマンド対応時の同一`--hostname`を適用する。`GH_HOST`が空や意図しない値でないことを確認し、指定ホストの`gh auth status`が成功し、対象アカウントにProject操作権限があることを確認する。`origin`・認証先・両設定ファイルを[設定解決規則](../../docs/aide/03-project.md#読み取り専用の設定解決)で照合する。`.agents/project.json`は通常ファイルで、中立テンプレート値または完全な共有設定でなければ停止する。`.agents/project.local.json`が存在する場合は通常ファイルでmode `0600`、完全なschemaを持ち、保存値をGitHubと照合する。ローカル設定が存在するのに不完全・不正・origin不一致ならテンプレートへフォールバックせず停止する。両設定に実値があれば同じ値でも競合として停止し、優先順位で選択しない。両方未設定の場合だけ中立テンプレート値を初期化の既定値として使う。
+1. 対象ホストを固定し、全ての`gh`認証確認・検索・取得・作成・更新・読み戻しに同一の`GH_HOST`、または各コマンド対応時の同一`--hostname`を適用する。`GH_HOST`が空や意図しない値でないことを確認し、指定ホストの`gh auth status`が成功し、対象アカウントにProject操作権限があることを確認する。`origin`・認証先・両設定ファイルを[設定解決規則](../../docs/aide/03-project.md#読み取り専用の設定解決)で照合する。`.agents/project.json`は通常ファイルで、中立テンプレート値または完全な共有設定でなければ停止する。`.agents/project.local.json`が存在する場合は通常ファイルで、POSIX環境ではmode `0600`（Windowsではmodeを確認対象としない）、完全なschemaを持ち、保存値をGitHubと照合する。ローカル設定が存在するのに不完全・不正・origin不一致ならテンプレートへフォールバックせず停止する。両設定に実値があれば同じ値でも競合として停止し、優先順位で選択しない。両方未設定の場合だけ中立テンプレート値を初期化の既定値として使う。
    - GitHubへの変更・設定書き込みの前に、次の「共有方式の選択と保存先切替」を実行する。既存設定がある場合も現在の方式を示して、維持か切替かを利用者に選択してもらう。未回答・拒否・判断不能なら副作用なしで停止する。
 2. `project`が未設定なら、前項で固定・検証したホストに対するProject検索でRepositoryにリンク済みの候補を探す。取得したProject URLのホストも指定ホストと完全一致することを確認する。GitHub EnterpriseではAPI/CLIの検索結果、Project URL、Repository originのいずれかが別ホストを指す場合、GitHub.comへ誤接続する可能性があるため停止し、読み書きを行わない。同名の未リンクProjectは、同じ可視性で空の場合のみ再利用する。候補の重複・閉鎖・Issue無効・owner/Repository不一致・取得不完全なら停止する。
 3. 対象と変更計画を提示して承認を待ち、その後にだけProject作成・リンク・Status設定を行う。Public作成と、項目があるProjectのStatus option変更には、通常承認とは別に、対象option・既存項目への影響を示した明示承認を得る。Statusの正とする選択肢は[Project管理](../../docs/aide/03-project.md#status)の5つ（`Backlog`、`Ready`、`In progress`、`In review`、`Done`）。
@@ -111,11 +111,11 @@ gh auth refresh --hostname github.com --scopes project
    - **共有する**：`.agents/project.json`に保存する。Repositoryの読者がProjectのowner・名前・URL・識別情報を読め、Git履歴やfork／テンプレートにも残る。Private Projectでも同じで、Repositoryを将来公開すると公開範囲が広がる。Projectのアクセス権は別途必要であり、共有設定は権限を付与しない。
    - **共有しない**：`.agents/project.local.json`に保存する。`.agents/project.json`は中立値を維持する。各cloneの主側で初期化が必要。同じcloneのリンク側は主側を読み取り専用で参照できる。
 2. 共有の選択時は、Repositoryの実際の可視性、Projectの可視性、Gitに保存する項目と公開対象を説明し、**公開範囲への個別の明示承認**を得る。Private Repositoryも読者への共有であり、この承認を省略しない。Project作成やPublic Project作成の承認で代用しない。共有先の`.agents/project.json`がGit追跡対象で無視されないことを確認する。未追跡なら中立ファイルの追跡を利用者に依頼して停止する。勝手にstage・commit・pushしない。ローカル設定を維持または新規作成する場合は`git check-ignore -q --no-index -- .agents/project.local.json`が成功し、Gitで追跡されていないことを確認する。
-3. 切替の場合は両ファイルの変更・削除対象を計画に含め、個別に承認を得る。非共有→共有では検証済みのローカル設定を共有先へ保存・読み戻し後に、内容が承認時と同じローカル設定だけを削除する。共有→非共有ではローカル設定をmode `0600`で保存・読み戻し後に、共有先を中立値へ戻す。**過去のGit履歴からは削除されない**ことを説明し、履歴改変は行わない。異なるProjectへの切替や両実値の競合解消を自動移行に混ぜず停止し、別途承認された解決計画を求める。
-4. 書き込み直前に実行位置・origin・GitHubの識別情報・可視性・Statusと、両ファイルの配置・Git状態・内容・権限が承認時から変わっていないことを再確認する。不一致なら再提案して承認を待つ。初回保存・維持更新・切替とも、変更前bytesと権限を保護された一時領域に保持し、同じディレクトリ内の一時ファイルへ新しいJSONを書き、読み戻してから置換する。新規作成は排他的に行い、既存を上書きしない。共有ファイルは元の権限を維持し、ローカルと一時ファイルはmode `0600`とする。symlinkを辿らず、不安全な配置・排他的操作ができない環境では停止する。
+3. 切替の場合は両ファイルの変更・削除対象を計画に含め、個別に承認を得る。非共有→共有では検証済みのローカル設定を共有先へ保存・読み戻し後に、内容が承認時と同じローカル設定だけを削除する。共有→非共有ではローカル設定を保存（POSIX環境ではmode `0600`、Windowsではmodeを設定対象としない）・読み戻し後に、共有先を中立値へ戻す。**過去のGit履歴からは削除されない**ことを説明し、履歴改変は行わない。異なるProjectへの切替や両実値の競合解消を自動移行に混ぜず停止し、別途承認された解決計画を求める。
+4. 書き込み直前に実行位置・origin・GitHubの識別情報・可視性・Statusと、両ファイルの配置・Git状態・内容・権限が承認時から変わっていないことを再確認する。不一致なら再提案して承認を待つ。初回保存・維持更新・切替とも、変更前bytesと権限を保護された一時領域に保持し、同じディレクトリ内の一時ファイルへ新しいJSONを書き、読み戻してから置換する。新規作成は排他的に行い、既存を上書きしない。共有ファイルは元の権限を維持し、ローカルと一時ファイルはPOSIX環境ではmode `0600`とする。Windowsではmodeを設定できなくても停止しない。symlinkを辿らず、不安全な配置・排他的操作ができない環境では停止する。
 5. 変更後に両設定の完全なschema・origin・GitHub照合と保存方式の不変条件（共有の実値だけ、または中立値＋ローカル実値）を読み戻す。途中失敗は成功扱いせず、他者の変更を上書きしないことを再確認して変更前へ復旧する。復旧不能や切替途中の両実値が残った場合は後続操作を止め、値を開示せず復旧が必要な相対パス・状態を報告する。復旧を検証するまで通常の設定解決へ進めない。一時ファイル・退避データを後始末し、認証情報を保存しない。Gitへのstage・commit・pushは設定保存とは別の許可を要する。
 
-非共有のローカル設定をIssue、PR、ログ、installer/NPM配布物へ出力しない。ローカル設定がGitで無視されていない、または権限を安全に設定できない場合は書き込みを停止する。共有設定も許可された保存先以外のログやIssueへ転載しない。
+非共有のローカル設定をIssue、PR、ログ、installer/NPM配布物へ出力しない。ローカル設定がGitで無視されていない場合と、POSIX環境で権限を安全に設定できない場合は書き込みを停止する。Windowsではmodeを設定できないことを停止理由としない。共有設定も許可された保存先以外のログやIssueへ転載しない。
 
 Gitの仕組みとしての総称は[ブランチ戦略](../../docs/aide/01-branches.md)で定義し、設定の更新場所は[Project管理](../../docs/aide/03-project.md)に従う。
 
@@ -134,10 +134,10 @@ Gitの仕組みとしての総称は[ブランチ戦略](../../docs/aide/01-bran
 
 共有／非共有の実値は同じschemaを使い、保存先だけを変える。中立値も実値もJSONの重複キーは全階層で拒否し、後勝ちの解釈をしない。トップレベルは`schema_version: 1`（整数・bool不可）、`repository: "OWNER/REPO"`、`project_defaults: {title: null, visibility: PRIVATE}`、`project`の4キーに限定する。`project`は`owner`（Repository owner）、`owner_type`（`User`または`Organization`）、`number`（正の整数・bool不可）、`node_id`、`title`、`url`、`visibility`（`PRIVATE`または`PUBLIC`）、`repository`の8キーだけとする。文字列は空でなく、`repository`は両箇所ともoriginに一致し、URLはoriginのホスト・owner_type・owner・numberと一致しなければならない。余分なキー・認証情報・token・field/option IDを含めない。両実値の共存は許さない。
 
-完了時はProject URLをユーザーへの直接応答でのみ報告する。確認・変更内容とローカル設定のignore・権限・整合性確認結果を伝える。Issue・PR・ログにはProject URLやローカル設定値を記録せず、安全な状態・検証の要約だけを残す。設定内容そのものは出力しない。停止した場合は理由と未実施の変更を報告する。
+完了時はProject URLをユーザーへの直接応答でのみ報告する。確認・変更内容とローカル設定のignore・権限・整合性確認結果を伝える。Windowsではmode `0600`の確認が対象外だったことも伝える。Issue・PR・ログにはProject URLやローカル設定値を記録せず、安全な状態・検証の要約だけを残す。設定内容そのものは出力しない。停止した場合は理由と未実施の変更を報告する。
 
 ## 安全境界
 
 - origin・認証先・Projectリンク・可視性・Status・設定の不一致、曖昧な候補、取得不完全、権限不足では推測で選択・変更しない。項目のあるProjectのStatus変更は個別承認がない限り行わず、未知optionは上書きしない。項目数はアーカイブ済みも含めて確認する。
-- 設定ファイルのsymlinkや不正な配置を拒否し、GitHubの状態を検証した後にのみ承認された保存先へ書き込む。ローカル設定はGit ignoreを確認し、mode `0600`で保存する。ログ・Issue・PRへ値を表示せず、秘密情報、token、field/option IDは保存しない。
+- 設定ファイルのsymlinkや不正な配置を拒否し、GitHubの状態を検証した後にのみ承認された保存先へ書き込む。ローカル設定はGit ignoreを確認し、POSIX環境ではmode `0600`で保存する（Windowsではmodeを設定対象としない）。ログ・Issue・PRへ値を表示せず、秘密情報、token、field/option IDは保存しない。
 - forkを含む別Repositoryへ共有設定を再利用するとき、originと不一致ならsource Repositoryの設定を使わず停止する。ユーザーの確認なしに設定をnullへ書き換えない。ローカル設定が存在してoriginと不一致の場合もProject操作を行わず停止する。AIDE自身のテンプレート源泉は中立値を保ち、installer/NPM配布物には専用中立テンプレートだけを含める。

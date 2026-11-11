@@ -56,6 +56,7 @@ class SharingSkillContractTests(unittest.TestCase):
             "過去のGit履歴からは削除されない", "承認時から変わっていない",
             "変更前bytesと権限", "新規作成は排他的", "他者の変更を上書きしない",
             "復旧を検証するまで通常の設定解決へ進めない", "mode `0600`",
+            "Windowsではmodeを設定できなくても停止しない",
         ):
             with self.subTest(contract=contract):
                 self.assertIn(contract, section)
