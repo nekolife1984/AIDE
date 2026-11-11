@@ -77,7 +77,7 @@ python3 /path/to/AIDE/scripts/aide_install.py /path/to/existing-repository --app
 `aide-init`は主作業ツリーで実行し、**共有する／共有しない**を選択します。未回答・未承認のまま保存先を決めません。
 
 - **共有する**：Git管理対象の`.agents/project.json`へ保存。同じRepositoryをcloneしたメンバーは、自分のGitHub認証とProjectアクセス権で共有設定を照合して利用できます。未追跡の初期設定ファイルは、先に利用者がGit追跡対象にしてください。
-- **共有しない**：`.agents/project.json`は中立値のまま、`.agents/project.local.json`（ignore対象・mode `0600`）へ保存。各cloneで初期化します。従来のローカル設定もそのまま利用できます。
+- **共有しない**：`.agents/project.json`は中立値のまま、`.agents/project.local.json`（ignore対象。POSIX環境ではmode `0600`、Windowsではmode対象外）へ保存。各cloneで初期化します。従来のローカル設定もそのまま利用できます。
 
 共有するとPrivate Projectでも名前・URL・識別情報がRepositoryの読者やGit履歴へ公開されるため、保存前に公開範囲への個別承認を求めます。設定共有はProjectへのアクセス権を付与しません。非共有へ戻しても過去の履歴は消えません。共有・ローカルの両設定に実値がある場合は優先順位で選ばず停止します。切替は主側の`aide-init`で変更・削除内容を確認してから行い、stage・commit・pushは別途承認が必要です。
 

@@ -107,8 +107,13 @@ def origin_identity(raw):
     return host, path
 
 
-def resolve_documented_config(cwd, env):
-    """正本文書の読み取り専用手順を、成功／停止条件まで実行する。"""
+def resolve_documented_config(cwd, env, platform=None):
+    """正本文書の読み取り専用手順を、成功／停止条件まで実行する。
+
+    platformはOS名（os.name相当）で、テストがWindows相当の判定を再現するために使う。
+    """
+    if platform is None:
+        platform = os.name
     if any(key in env for key in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR')):
         raise ContractStop('Git directory override is not allowed')
     commands = extract_commands()
@@ -167,7 +172,7 @@ def resolve_documented_config(cwd, env):
             raise ContractStop('Initialize from the primary working tree')
         return primary, None
     local = regular_file(primary, '.agents/project.local.json')
-    if stat.S_IMODE(local.stat().st_mode) != 0o600:
+    if platform != 'nt' and stat.S_IMODE(local.stat().st_mode) != 0o600:
         raise ContractStop('Local configuration permissions are invalid')
     tracked = git(primary, 'git ls-files -- .agents/project.local.json', env)
     ignored = subprocess.run(
@@ -271,7 +276,7 @@ class ProjectConfigResolutionTests(unittest.TestCase):
         document = (ROOT / PROJECT_DOC).read_text()
         for contract in (
             'NUL', '先頭レコード', 'common Git directory', '別clone', 'リンク側のローカル設定',
-            'symlink', 'mode `0600`', '完全なschema', '設定値を出力しない',
+            'symlink', 'mode `0600`', 'Windowsではmodeの不一致だけでは停止しない', '完全なschema', '設定値を出力しない',
             'GitHubの読み取り専用照会', 'フォールバックせず停止', 'GIT_DIR',
             'GIT_WORK_TREE', 'GIT_COMMON_DIR', '追跡されていない',
         ):
@@ -340,6 +345,15 @@ class ProjectConfigResolutionTests(unittest.TestCase):
                     self.command('git', 'reset', '--', '.agents/project.local.json')
                 (self.primary / '.gitignore').write_text('/.agents/project.local.json\n')
                 self.write_live(LIVE)
+
+    def test_windows_platform_does_not_stop_for_local_mode(self):
+        self.local.chmod(0o644)
+        with self.assertRaisesRegex(ContractStop, 'permissions are invalid'):
+            resolve_documented_config(self.linked, self.env, platform='posix')
+        self.assertEqual(
+            resolve_documented_config(self.linked, self.env, platform='nt'),
+            (self.primary, self.local),
+        )
 
     def test_malformed_schema_and_identity_do_not_disclose_values(self):
         variants = []

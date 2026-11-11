@@ -1827,6 +1827,7 @@ class AideInstallTests(unittest.TestCase):
             "ローカル設定が存在するのに不完全・不正・origin不一致なら"
             "テンプレートへフォールバックせず停止する",
             "mode `0600`",
+            "Windowsではmodeを確認対象としない",
             "git check-ignore -q --no-index -- .agents/project.local.json",
             "ローカル設定をIssue、PR、ログ、installer/NPM配布物へ出力しない",
         )
