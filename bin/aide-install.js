@@ -4,7 +4,8 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const installer = path.resolve(__dirname, "../scripts/aide_install.py");
-const candidates = process.env.PYTHON ? [process.env.PYTHON] : ["python3", "python", "py"];
+const candidates = process.env.PYTHON ? [process.env.PYTHON] :
+  process.platform === "win32" ? ["py", "python", "python3"] : ["python3", "python", "py"];
 for (const python of candidates) {
   const result = spawnSync(python, [installer, ...process.argv.slice(2)], {
     stdio: "inherit",

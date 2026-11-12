@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -115,6 +116,18 @@ class GitignoreConfirmationTests(unittest.TestCase):
                 self.assertNotEqual(aide_install.main([str(self.root), "--apply"]), 0)
         self.assertEqual(outside.read_bytes(), b"keep\n")
         self.assertFalse((self.root / ".agents").exists())
+
+    def test_windows_reparse_point_stops_before_open(self):
+        original = self.ignore.read_bytes()
+        info = self.ignore.lstat()
+        reparse = SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400)
+        with mock.patch.object(aide_install, "_is_windows", return_value=True), \
+                mock.patch.object(Path, "lstat", return_value=reparse), \
+                mock.patch.object(aide_install.os, "open") as open_mock:
+            with self.assertRaises(aide_install.InstallError):
+                aide_install.open_gitignore(self.ignore, os.O_RDWR | os.O_APPEND)
+        open_mock.assert_not_called()
+        self.assert_unchanged(original)
 
     def test_windows_without_nofollow_appends(self):
         original = self.ignore.read_bytes()
