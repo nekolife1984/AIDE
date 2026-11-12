@@ -1,8 +1,10 @@
 import contextlib
 import io
+import os
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -114,6 +116,72 @@ class GitignoreConfirmationTests(unittest.TestCase):
                 self.assertNotEqual(aide_install.main([str(self.root), "--apply"]), 0)
         self.assertEqual(outside.read_bytes(), b"keep\n")
         self.assertFalse((self.root / ".agents").exists())
+
+    def test_windows_reparse_point_stops_before_open(self):
+        original = self.ignore.read_bytes()
+        info = self.ignore.lstat()
+        reparse = SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400)
+        with mock.patch.object(aide_install, "_is_windows", return_value=True), \
+                mock.patch.object(Path, "lstat", return_value=reparse), \
+                mock.patch.object(aide_install.os, "open") as open_mock:
+            with self.assertRaises(aide_install.InstallError):
+                aide_install.open_gitignore(self.ignore, os.O_RDWR | os.O_APPEND)
+        open_mock.assert_not_called()
+        self.assert_unchanged(original)
+
+    def test_windows_without_nofollow_appends(self):
+        original = self.ignore.read_bytes()
+        with mock.patch.object(aide_install, "_is_windows", return_value=True), mock.patch.object(aide_install.os, "O_NOFOLLOW", create=True):
+            del aide_install.os.O_NOFOLLOW
+            code, output, _ = self.run_cli()
+        self.assertEqual(code, 0, output)
+        self.assertTrue(self.ignore.read_bytes().startswith(original))
+
+    def test_windows_without_nofollow_restores_after_unexpected_error(self):
+        original = self.ignore.read_bytes()
+        real_check = aide_install.project_config_is_ignored
+        calls = 0
+        def fail_after_append(root):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ValueError("unexpected failure")
+            return real_check(root)
+        with mock.patch.object(aide_install, "_is_windows", return_value=True), mock.patch.object(aide_install.os, "O_NOFOLLOW", create=True), mock.patch.object(aide_install, "project_config_is_ignored", side_effect=fail_after_append):
+            del aide_install.os.O_NOFOLLOW
+            code, output, _ = self.run_cli()
+        self.assertNotEqual(code, 0, output)
+        self.assert_unchanged(original)
+
+    def test_posix_without_nofollow_fails_closed(self):
+        original = self.ignore.read_bytes()
+        with mock.patch.object(aide_install, "_is_windows", return_value=False), mock.patch.object(aide_install.os, "O_NOFOLLOW", create=True):
+            del aide_install.os.O_NOFOLLOW
+            code, output, _ = self.run_cli()
+        self.assertNotEqual(code, 0, output)
+        self.assert_unchanged(original)
+
+    def test_unexpected_failure_and_rollback_failure_are_reported(self):
+        original = self.ignore.read_bytes()
+        real_check = aide_install.project_config_is_ignored
+        calls = 0
+        def fail_after_append(root):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ValueError("unexpected failure")
+            return real_check(root)
+        with mock.patch.object(aide_install, "project_config_is_ignored", side_effect=fail_after_append):
+            code, output, _ = self.run_cli()
+        self.assertNotEqual(code, 0, output)
+        self.assert_unchanged(original)
+
+        with mock.patch.object(aide_install, "project_config_is_ignored", side_effect=fail_after_append), mock.patch.object(aide_install, "open_gitignore", side_effect=[aide_install.open_gitignore(self.ignore, os.O_RDWR | os.O_APPEND), ValueError("rollback failure")]):
+            calls = 0
+            code, output, _ = self.run_cli()
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("manual recovery required", output)
+        self.assertIn("restore .gitignore", output)
 
     def test_missing_gitignore_keeps_noninteractive_creation(self):
         self.ignore.unlink()

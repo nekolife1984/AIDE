@@ -1218,6 +1218,37 @@ def plan_gitignore_append(root: Path) -> tuple[bytes, bytes] | None:
     return original, suffix
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def open_gitignore(destination: Path, flags: int) -> int:
+    """Open only the checked regular file; POSIX must have atomic no-follow."""
+    if not _is_windows():
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise InstallError("安全な.gitignoreのオープンが利用できません")
+        return os.open(destination, flags | os.O_NOFOLLOW)
+
+    before = destination.lstat()
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    if not stat.S_ISREG(before.st_mode) or getattr(before, "st_file_attributes", 0) & reparse:
+        raise InstallError(".gitignoreが通常ファイルではありません")
+    fd = os.open(destination, flags | getattr(os, "O_BINARY", 0))
+    try:
+        opened = os.fstat(fd)
+        after = destination.lstat()
+        if (not before.st_ino or not opened.st_ino or not after.st_ino
+                or not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(after.st_mode)
+                or getattr(after, "st_file_attributes", 0) & reparse
+                or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)
+                or (after.st_dev, after.st_ino) != (opened.st_dev, opened.st_ino)):
+            raise InstallError(".gitignoreがオープン中に変更されました")
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def install(
     root: Path,
     additions: list[str],
@@ -1272,7 +1303,7 @@ def install(
         if gitignore_append is not None:
             original, suffix = gitignore_append
             destination = safe_destination(root, ".gitignore")
-            fd = os.open(destination, os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW)
+            fd = open_gitignore(destination, os.O_RDWR | os.O_APPEND)
             with os.fdopen(fd, "r+b") as output:
                 if not stat.S_ISREG(os.fstat(output.fileno()).st_mode) or output.read() != original:
                     raise InstallError("承認後に.gitignoreが変更されたため停止しました")
@@ -1283,44 +1314,44 @@ def install(
                 raise InstallError("追記後もローカル設定が無視されません。下位のignoreルール等を確認してください")
         for relative in legacy_cleanup:
             safe_destination(root, relative).unlink(missing_ok=True)
-    except (OSError, InstallError) as exc:
+    except Exception as exc:
         rollback_failures: list[str] = []
         if appended and gitignore_append is not None:
             original, suffix = gitignore_append
             try:
                 destination = safe_destination(root, ".gitignore")
-                fd = os.open(destination, os.O_RDWR | os.O_NOFOLLOW)
+                fd = open_gitignore(destination, os.O_RDWR)
                 with os.fdopen(fd, "r+b") as output:
                     current = output.read()
                     if current != original + suffix and not (current.startswith(original) and (original + suffix).startswith(current)):
                         raise InstallError("追記後に.gitignoreが変更されています")
                     output.truncate(len(original))
-            except (OSError, InstallError):
+            except Exception:
                 rollback_failures.append("restore .gitignore: manual recovery required")
         restore_targets: list[Path] = []
         for source, destination, original in reversed(moved):
             try:
                 destination.write_bytes(original)
                 os.replace(destination, source)
-            except OSError as rollback_exc:
+            except Exception as rollback_exc:
                 restore_targets.append(source)
                 rollback_failures.append(
                     f"restore document: {source.relative_to(root).as_posix()} <- "
-                    f"{destination.relative_to(root).as_posix()}; errno={rollback_exc.errno}"
+                    f"{destination.relative_to(root).as_posix()}; errno={getattr(rollback_exc, 'errno', None)}"
                 )
         for path in reversed(created):
             try:
                 path.unlink()
-            except OSError as rollback_exc:
+            except Exception as rollback_exc:
                 rollback_failures.append(
-                    f"remove file: {path.relative_to(root).as_posix()}; errno={rollback_exc.errno}"
+                    f"remove file: {path.relative_to(root).as_posix()}; errno={getattr(rollback_exc, 'errno', None)}"
                 )
         for path in reversed(created_dirs):
             try:
                 path.rmdir()
-            except OSError as rollback_exc:
+            except Exception as rollback_exc:
                 rollback_failures.append(
-                    f"remove directory: {path.relative_to(root).as_posix()}; errno={rollback_exc.errno}"
+                    f"remove directory: {path.relative_to(root).as_posix()}; errno={getattr(rollback_exc, 'errno', None)}"
                 )
         if rollback_failures:
             remaining_paths: list[str] = []
@@ -1331,7 +1362,7 @@ def install(
                     path.lstat()
                 except FileNotFoundError:
                     continue
-                except OSError:
+                except Exception:
                     relative += " (state unavailable)"
                 remaining_paths.append(relative)
             details = "\n".join(f"  - {failure}" for failure in rollback_failures)
