@@ -20,6 +20,7 @@ class ReviewContextContractTests(unittest.TestCase):
             '個人情報・認証情報・金銭に関するデータや法規制が絡む事項',
             'データの性質を必ず明示する', '個人・ローカル限定でも水準を下げない',
             '試作から本番への移行も文脈の変更として扱う',
+            'この下限は、以下の緩和の目安より優先する',
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
@@ -27,6 +28,9 @@ class ReviewContextContractTests(unittest.TestCase):
 
     def test_workflow_transmits_context_and_tracks_rejection(self):
         text = (ROOT / '.agents/skills/aide-workflow/SKILL.md').read_text(encoding='utf-8')
-        for phrase in ('想定ユーザー・動作環境', '結果と利用文脈', '過剰な必須指摘の不採用', '文脈変更時に再評価'):
+        for phrase in (
+            '想定ユーザー・動作環境', '結果と利用文脈', '過剰な必須指摘の不採用', '文脈変更時に再評価',
+            '個人情報等を扱う変更でのデータの性質の明示は[レビュールール](../../docs/aide/07-review.md#利用文脈)に従い必須',
+        ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
